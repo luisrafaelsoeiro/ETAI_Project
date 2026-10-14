@@ -1,6 +1,23 @@
+# Data manipulation
 pandas>=2.0
 numpy>=1.24
-scikit-learn>=1.9
 PyYAML>=6.0
+
+# Feature engineering
 category-encoders>=2.6
+
+# Hyperparameter optimization
 optuna>=4.0
+
+# Visualization
+matplotlib==3.10.6
+seaborn==0.12.2
+plotly
+ipywidgets
+upsetplot
+
+# Machine learning and clustering
+scikit-learn==1.7.2
+scipy
+MiniSom
+xgboost
