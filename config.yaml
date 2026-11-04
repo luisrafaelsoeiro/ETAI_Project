@@ -1,0 +1,171 @@
+# ETAI 2026/27 -- Customer repurchase & spend prediction
+# Rules and choices only. Fitted values (medians, category means, scales) are never stored
+# here: they are learned again from the training rows of every split.
+
+data:
+  train_path: data/raw/train.csv
+  test_path: data/raw/test.csv
+  clientes_path: data/raw/clientes.csv
+  sample_submission_path: data/raw/sample_submission.csv
+  id_column: id
+  group_column: customer_id
+  date_column: purchase_date
+  target_columns: [repeat_purchase_90d, spend_next_90d]
+  # kept row-aligned beside X (split, grouping, submission), never model inputs
+  extras_columns: [id, customer_id, purchase_date]
+  # random_noise: pure noise (corr with target -0.012), see preprocessing.ipynb section 5
+  drop_columns: [random_noise]
+
+classification:
+  target: repeat_purchase_90d
+
+regression:
+  target: spend_next_90d
+  # trained only on repeat purchasers with an observed spend (targets are never imputed)
+  row_filter: "repeat_purchase_90d == 1 and spend_next_90d.notna()"
+
+# locked test set: never used to fit, tune, compare or choose anything
+test_set:
+  strategy: temporal     # test.csv lies strictly after train.csv in time
+  size: 0.2
+  random_state: 42       # only used by strategy "stratified"
+
+diagnostics:
+  date_column: purchase_date
+  column_renames:
+    "Total a Pagar": total_payable
+    "Total Bruto": gross_total
+    "Total Liquido": net_total
+    "Total Imp_": total_tax
+    "Total Portes": shipping_cost
+    "Total Desc_ Global": global_discount_total
+    "Total Desc_ Linha": line_discount_total
+    "Custo": cost
+    "N_ Detalhes": line_item_count
+
+  # negative amounts, counts and time intervals are impossible -> NaN
+  non_negative_columns:
+    - total_payable
+    - gross_total
+    - net_total
+    - total_tax
+    - shipping_cost
+    - global_discount_total
+    - line_discount_total
+    - cost
+    - line_item_count
+    - invoice_count_current_purchase
+    - days_since_previous_purchase
+    - customer_tenure_days
+    - prior_purchase_count
+    - prior_total_spend
+    - prior_mean_purchase_value
+    - prior_std_purchase_value
+    - prior_min_purchase_value
+    - prior_max_purchase_value
+    - prior_mean_gap_days
+    - prior_std_gap_days
+    - purchase_count_30d
+    - spend_30d
+    - purchase_count_90d
+    - spend_90d
+    - purchase_count_180d
+    - spend_180d
+    - purchase_count_365d
+    - spend_365d
+
+  # the exact value 1,000,000,000 only appears in these two columns -> placeholder -> NaN
+  placeholder_values: [1000000000]
+  placeholder_columns: [prior_mean_purchase_value, spend_365d]
+
+  # NaN -> value implied by an identity between columns of the same row
+  # (each identity holds for >= 99% of the rows where all terms are observed)
+  recompute_rules:
+    - column: prior_mean_purchase_value
+      expression: "prior_total_spend / prior_purchase_count"
+      when: "prior_purchase_count > 0"
+    - column: days_since_previous_purchase
+      expression: "customer_tenure_days"
+      when: "prior_purchase_count == 1"
+    - column: days_since_previous_purchase
+      expression: "customer_tenure_days - prior_mean_gap_days * (prior_purchase_count - 1)"
+      when: "prior_purchase_count >= 2"
+    - column: prior_mean_gap_days
+      expression: "(customer_tenure_days - days_since_previous_purchase) / (prior_purchase_count - 1)"
+      when: "prior_purchase_count >= 2"
+    - column: spend_365d
+      expression: "prior_total_spend"
+      when: "customer_tenure_days <= 365"
+
+  # NaN that cannot exist ("not applicable") -> 0, with the flags below marking them
+  structural_fill:
+    - when: "prior_purchase_count == 0"      # first purchase: no history at all
+      value: 0
+      columns: [days_since_previous_purchase, prior_mean_purchase_value,
+                prior_min_purchase_value, prior_max_purchase_value]
+    - when: "prior_purchase_count < 2"       # a std / a gap needs two purchases
+      value: 0
+      columns: [prior_std_purchase_value, prior_mean_gap_days]
+    - when: "prior_purchase_count < 3"       # a std of gaps needs two gaps
+      value: 0
+      columns: [prior_std_gap_days]
+
+  flags:
+    is_first_purchase: "prior_purchase_count == 0"
+    has_gap_history: "prior_purchase_count >= 2"
+
+  # gross_total = net_total + line + global discounts (exact, 100% of rows);
+  # total_payable vs net_total correlation 0.996
+  redundant_columns: [gross_total, total_payable]
+
+  # rows where everything except these is missing are dropped from training
+  almost_empty_preserved_columns: [id, customer_id, repeat_purchase_90d]
+
+preprocessing:
+  numeric_features:
+    - net_total
+    - total_tax
+    - shipping_cost
+    - global_discount_total
+    - line_discount_total
+    - cost
+    - line_item_count
+    - invoice_count_current_purchase
+    - days_since_previous_purchase
+    - customer_tenure_days
+    - prior_purchase_count
+    - prior_total_spend
+    - prior_mean_purchase_value
+    - prior_std_purchase_value
+    - prior_min_purchase_value
+    - prior_max_purchase_value
+    - prior_mean_gap_days
+    - prior_std_gap_days
+    - purchase_count_30d
+    - spend_30d
+    - purchase_count_90d
+    - spend_90d
+    - purchase_count_180d
+    - spend_180d
+    - purchase_count_365d
+    - spend_365d
+  categorical_features:
+    - payment_type
+    - salesperson
+    - commercial_zone
+    - transport_method
+    - warehouse
+    - document_series
+  flag_features: [is_first_purchase, has_gap_history]
+  # columns whose missingness carries information (preprocessing.ipynb section 6):
+  # after the identity fill, spend_365d is only missing for customers with > 365 days of
+  # tenure, so a median alone would pull them towards short-tenure spend
+  mnar_indicator_sources: [spend_365d]
+  imputation:
+    numeric_strategy: median
+    categorical_strategy: most_frequent
+  # target: one column per feature (transport_method has 80 levels); robust: skewed
+  # amounts with extreme values. To be confirmed by the encoder x scaler comparison.
+  encoder: target
+  scaler: robust
+  random_state: 42
