@@ -92,6 +92,22 @@ def compare_encoders_scalers(preprocessing_config, model_factory, X, y, folds, t
     return ranking, per_fold
 
 
+def compare_preprocessing_variants(variants: dict, model_factory, X, y, folds, task, metric) -> tuple:
+    """
+    Scores several preprocessing configurations (name -> preprocessing config) with the same
+    model on the SAME folds. Returns (table, {name: per-fold validation scores}) for paired
+    comparisons -- used for ablations (with vs without a feature group) and imputers.
+    """
+    higher_is_better = not SCORERS[task][metric].startswith("neg_")
+    per_fold, rows = {}, []
+    for name, config in variants.items():
+        scores = cross_validate_pipeline(make_pipeline(config, model_factory()), X, y, folds, task)
+        per_fold[name] = scores[f"validation_{metric}"].to_numpy()
+        rows.append({"variant": name, f"mean_{metric}": per_fold[name].mean(), f"std_{metric}": per_fold[name].std(ddof=1)})
+    table = pd.DataFrame(rows).sort_values(f"mean_{metric}", ascending=not higher_is_better).reset_index(drop=True)
+    return table, per_fold
+
+
 def paired_comparison(scores_a, scores_b, higher_is_better: bool = True) -> dict:
     """
     Same folds -> subtract fold by fold. A mean difference more than 2 standard errors

@@ -2,7 +2,7 @@
 Terminal entry point: python main.py [--task classification|regression|both]
 
 For each task:
-raw train.csv -> clean_dataset -> drop_training_rows -> task rows -> (X, y, extras)
+raw train.csv -> clean_dataset (+ clientes.csv join) -> drop_training_rows -> task rows -> (X, y, extras)
 -> locked temporal test set -> Pipeline(build_preprocessor + build_model)
 -> temporal cross-validation on the development set (train vs validation scores).
 
@@ -20,7 +20,7 @@ import regression.model as regression_model
 import regression.preprocessing as regression_prep
 from src.evaluate import cross_validate_pipeline, make_pipeline, summarize, temporal_folds
 from src.preprocessing import (
-    build_preprocessor, clean_dataset, drop_training_rows, load_data, split_dev_test, task_preprocessing_config,
+    build_preprocessor, drop_training_rows, load_data, prepare_table, split_dev_test, task_preprocessing_config,
 )
 
 TASKS = {"classification": classification_prep, "regression": regression_prep}
@@ -37,8 +37,9 @@ def run_preprocessing(config: dict, task: str, verbose: bool = True) -> dict:
     data_cfg, diag_cfg = config["data"], config["diagnostics"]
     prep_cfg = task_preprocessing_config(config, task)
 
-    train, _ = clean_dataset(load_data(data_cfg["train_path"]), diag_cfg)
-    train, _ = drop_training_rows(train, diag_cfg, data_cfg["id_column"])
+    clientes = load_data(data_cfg["clientes_path"])
+    train, _ = prepare_table(load_data(data_cfg["train_path"]), config, clientes)
+    train, _ = drop_training_rows(train, diag_cfg, data_cfg["id_column"], config.get("customers"))
     train = task_prep.select_training_rows(train, config)
     X, y, extras = task_prep.prepare_features(train, config)
     X_dev, X_test, y_dev, y_test, extras_dev, extras_test = split_dev_test(
@@ -46,7 +47,7 @@ def run_preprocessing(config: dict, task: str, verbose: bool = True) -> dict:
     )
 
     # test.csv: same stateless cleaning, no rows dropped, no target needed
-    kaggle, _ = clean_dataset(load_data(data_cfg["test_path"]), diag_cfg)
+    kaggle, _ = prepare_table(load_data(data_cfg["test_path"]), config, clientes)
     X_kaggle, _, extras_kaggle = task_prep.prepare_features(kaggle, config)
     if len(X_kaggle) != len(kaggle):
         raise AssertionError("test.csv lost rows -- every id needs a prediction.")

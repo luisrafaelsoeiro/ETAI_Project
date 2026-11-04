@@ -16,7 +16,7 @@ Facts below marked 🔎 were checked on the raw data while writing this list.
 - [x] `main.py`: `python main.py [--task classification|regression|both]` runs it end to end and checks that no NaN is left and test.csv keeps its 986 rows. The model step is still missing (item 6).
 - [x] The notebook imports these functions (sections 5–8) instead of redefining them, so the notebook and pipeline run the same code.
 - [ ] `Self_utils/py_functions_preproc.py` (code from another project) was **not** deleted: `2.Outlier_detection.ipynb` still imports it as `pf`. Handle it together with the outlier notebook rewrite (P1).
-- [ ] Old notebook functions in sections 1–4 (`standardize_columns`, `replace_invalid_values`, `validate_and_handle_duplicates`) still duplicate the module → trim them with item 9.
+- [x] Old notebook functions in sections 1–4 removed or turned into diagnostics (item 9).
 
 ### 2. Fill `config.yaml` ✅
 - [x] `data`, `classification`, `regression`, `test_set`, `diagnostics`, `preprocessing`. Only rules are stored, never fitted values.
@@ -75,25 +75,25 @@ Facts below marked 🔎 were checked on the raw data while writing this list.
 
 ## P1 — Data-quality checks still missing
 
-- [ ] 🔎 **Accounting identities:** `gross − line_discount − global_discount = net` holds for 100 % of rows; `net + tax + shipping = total_payable` holds for only **83.7 %** → investigate the other 16 % (rounding? missing tax? invalid?) and decide.
-- [ ] **Logical consistency asserts:** `count_30d ≤ 90d ≤ 180d ≤ 365d` and same for spend; `prior_min ≤ prior_mean ≤ prior_max`; `customer_tenure_days ≥ days_since_previous_purchase`; `spend_365d ≤ prior_total_spend` (🔎 30d ≤ 90d and min ≤ max already pass — add the rest).
-- [ ] 🔎 **Rare categories:** `transport_method` has 80 levels, 40 of them with < 10 rows → group rare levels into `"Other"` (threshold fitted on train) or use count/target encoding.
+- [x] **Accounting identities** (notebook 5.2): `gross − discounts = net` holds on 100%. The 16% "failures" of `net + tax + shipping = total_payable` are exactly the rows with a shipping cost: `total_payable = net + tax` holds on 100%. Shipping just isn't included → no error; `total_payable` dropped as an exact sum.
+- [x] **Logical consistency** (notebook 5.2, `diagnostics.consistency_rules`, `apply_consistency_rules()`): 16 rules. 13 have 0 violations. `prior_mean_purchase_value` ≠ total / count (46 train, 8–25× inflated) and `spend_365d` > prior total spend (39 train) → `NaN` → recovered by the identities. `cost > net_total` (39 sales below cost) is plausible → kept, report only. Kept despite −0.0055 classification accuracy (notebook 11.1, reason documented).
+- [x] **Rare categories** (notebook 11.4): `RareCategoryGrouper` (threshold learned per fold) tested at ≥ 10 / ≥ 30 rows → slightly worse for both tasks → off (`rare_category_min_count: 0`); the target encoder already shrinks rare categories.
 - [ ] **Outliers & skew** (`2.Outlier_detection.ipynb`):
   - [ ] It reuses another project's code/columns (cell 24 `spend_vegetables_per_year`, …) and saves to `Data/cleaned_df` (wrong folder, no `.csv`) — rewrite for this dataset.
   - [ ] 🔎 Skew goes up to 27.5 (`global_discount_total`), 21.3 (`prior_max_purchase_value`), 20.4 (`spend_365d`) → per-column decision: `log1p`, winsorise with caps fitted on train, or `RobustScaler`.
   - [ ] Never drop outlier rows from test; any removal is train-only and its effect must be measured in CV.
-- [ ] **`clientes.csv` merge** (optional table):
-  - [ ] 🔎 Drop `customer_type` (100 % NaN); high-missing address fields (`street` 52 %, `island` 51 %, `city` 48 %) → drop or reduce to `commercial_region`/`country_or_region`.
-  - [ ] Check `customer_since_year ≤ purchase year` (no future info) and handle customers not found in `clientes` (your cross-check in §2.1).
-  - [ ] Compare model score with vs without the merge.
-- [ ] **Purchase-time features** (no future info): month / weekday / quarter from `purchase_date`, margin (`net_total − cost`), discount rate, average line value, `spend_30d / spend_365d` ratios.
+- [x] **`clientes.csv` merge** (notebook 11.3–11.4, `customers` in config, `add_customer_features()`):
+  - [x] Kept `country_or_region`, `commercial_region`, `island`, `municipality`, `customer_since_year` → `years_as_customer`; dropped `customer_type` (100% NaN), id-like `company_name`/`address`, half-empty `street`/`city`, high-cardinality postal codes.
+  - [x] Every customer matched; `customer_since_year` never after the purchase year (no future info).
+  - [x] With vs without: regression 42 RMSE better → used by regression; classification slightly worse → not used.
+- [x] **Purchase-time features** (notebook 11.2–11.4): `purchase_month`, `purchase_weekday` + 6 ratios. Date parts: regression 41 RMSE better on 5/5 folds → used by regression. Ratios: no effect → computed, not used. Classification: none helps → original features.
 
 ---
 
 ## P2 — Challenge / extra credit (02 notebook "Challenge")
 
-- [ ] Alternative imputers (`KNNImputer` with scaling first, `IterativeImputer`, constant) compared **inside CV**.
-- [ ] Extra data issues found beyond the EDA (items in P1) added to `clean_dataset`.
+- [x] Alternative imputers compared inside CV (notebook 12): numeric median / mean / constant / knn / iterative and categorical most frequent / `"Missing"`. Median stays (differences ≪ fold noise). Regression switches to an explicit `"Missing"` category (decisive, 5/5 folds).
+- [x] Extra data issues found beyond the EDA (consistency rules, inflated values) added to `clean_dataset`.
 - [ ] Compare preprocessed models vs the week-2 baseline; explain why it improved (or didn't); state the current best model.
 - [ ] Leakage demo: fit scaler/encoder on the full data vs per fold and show the optimistic gap.
 - [ ] Sanity tests: `clean_dataset(test)` keeps 986 rows in the same order; works with targets absent; no NaN after `transform`; train/test column sets match.
@@ -102,7 +102,7 @@ Facts below marked 🔎 were checked on the raw data while writing this list.
 
 ## Documentation
 
-- [ ] README → **Preprocessing decisions** section: one line per column (problem | mechanism | action | why).
-- [ ] README → **Pipeline progress** log (week by week) and **Best model** section.
-- [ ] README → fix project structure (it lists `notebooks/` and `results/`, which don't exist; notebooks are in the root).
-- [ ] Every notebook section ends with a short markdown conclusion, not just output.
+- [x] README → **Preprocessing decisions** (17 parts) including a column-by-column table (problem | mechanism | action | why).
+- [x] README → **Pipeline progress** log and **Best model** section.
+- [x] README → project structure matches the repository.
+- [x] Every notebook section (1–13) ends with a markdown conclusion or verdict.

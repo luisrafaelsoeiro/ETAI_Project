@@ -18,8 +18,10 @@ import unicodedata
 
 import numpy as np
 import pandas as pd
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer
-from sklearn.impute import KNNImputer, SimpleImputer
+from sklearn.experimental import enable_iterative_imputer  # noqa: F401 -- makes IterativeImputer importable
+from sklearn.impute import IterativeImputer, KNNImputer, SimpleImputer
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import (
@@ -71,6 +73,36 @@ def flag_invalid_values(df: pd.DataFrame, diagnostics_config: dict) -> pd.DataFr
     return pd.DataFrame(report)
 
 
+def _referenced_columns(expression: str, columns) -> list:
+    return [c for c in re.findall(r"[A-Za-z_][A-Za-z0-9_]*", expression) if c in columns]
+
+
+def apply_consistency_rules(df: pd.DataFrame, rules: list) -> pd.DataFrame:
+    """
+    Checks logical rules between columns of the same row (e.g. 30-day spend <= 90-day
+    spend). A rule is only checked on rows where every column it uses is observed. When a
+    rule names a column to `invalidate`, that column is set to NaN **in place** on the
+    violating rows -- the value is impossible, so it is treated as missing (and may then be
+    recovered by `apply_recompute_rules`). Rules without `invalidate` are report-only.
+    Returns one report row per rule.
+    """
+    report = []
+    for rule in rules:
+        expression = rule["rule"]
+        used = _referenced_columns(expression + " " + rule.get("when", ""), df.columns)
+        checked = df[used].notna().all(axis=1)
+        if "when" in rule:
+            checked &= df.eval(rule["when"]).fillna(False).astype(bool)
+        violations = checked & ~df.eval(expression).fillna(False).astype(bool)
+        column = rule.get("invalidate")
+        if column:
+            df.loc[violations, column] = np.nan
+        report.append({"step": f"inconsistent -> NaN ({column})" if column else "consistency check (report only)",
+                       "column": column or "", "rule": expression,
+                       "rows_checked": int(checked.sum()), "values": int(violations.sum())})
+    return pd.DataFrame(report)
+
+
 def apply_recompute_rules(df: pd.DataFrame, rules: list) -> pd.DataFrame:
     """
     Fills NaN **in place** with values that follow from an exact identity between columns
@@ -113,6 +145,49 @@ def add_flags(df: pd.DataFrame, flags: dict) -> pd.DataFrame:
     return out
 
 
+_DATE_PARTS = {
+    "month": lambda d: d.dt.month,
+    "quarter": lambda d: d.dt.quarter,
+    "weekday": lambda d: d.dt.weekday,
+}
+
+
+def add_date_features(df: pd.DataFrame, date_column: str, parts: list) -> pd.DataFrame:
+    """`purchase_month`, `purchase_weekday`, ... -- known at the moment of the purchase."""
+    out = df.copy()
+    for part in parts:
+        out[f"purchase_{part}"] = _DATE_PARTS[part](out[date_column])
+    return out
+
+
+def add_derived_features(df: pd.DataFrame, features: dict) -> pd.DataFrame:
+    """New columns from expressions on the same row (margin, discount rate, ...).
+    Divisions by zero become NaN, never +/-inf."""
+    out = df.copy()
+    for name, expression in features.items():
+        out[name] = out.eval(expression).replace([np.inf, -np.inf], np.nan)
+    return out
+
+
+def add_customer_features(df: pd.DataFrame, clientes: pd.DataFrame, customers_config: dict) -> pd.DataFrame:
+    """
+    Left-joins the chosen columns of clientes.csv on the customer id. Stateless and
+    row-preserving (same rows, same order): a customer missing from clientes simply gets
+    NaN, which the fitted imputers handle. `derived_features` are computed after the join
+    (e.g. years as a customer at the moment of the purchase).
+    """
+    if not customers_config.get("use", False):
+        return df
+    key = customers_config["key"]
+    customers = standardize_columns(clientes, {}).set_index(key)[customers_config["columns"]]
+    out = df.join(customers, on=key)
+    out = add_derived_features(out, customers_config.get("derived_features", {}))
+    out = out.drop(columns=[c for c in customers_config.get("drop_after_derive", []) if c in out.columns])
+    if len(out) != len(df) or not out.index.equals(df.index):
+        raise AssertionError("add_customer_features must keep every row, in the same order.")
+    return out
+
+
 def clean_dataset(df: pd.DataFrame, diagnostics_config: dict):
     """
     Applies the diagnosis as stateless rules. Row-preserving -- same rows, same order --
@@ -128,10 +203,14 @@ def clean_dataset(df: pd.DataFrame, diagnostics_config: dict):
 
     reports = [
         flag_invalid_values(out, diagnostics_config),
+        apply_consistency_rules(out, diagnostics_config.get("consistency_rules", [])),
         apply_recompute_rules(out, diagnostics_config.get("recompute_rules", [])),
         apply_structural_fill(out, diagnostics_config.get("structural_fill", [])),
     ]
     out = add_flags(out, diagnostics_config.get("flags", {}))
+    if date_column and date_column in out.columns:
+        out = add_date_features(out, date_column, diagnostics_config.get("date_features", []))
+    out = add_derived_features(out, diagnostics_config.get("derived_features", {}))
 
     columns_to_drop = [c for c in diagnostics_config.get("redundant_columns", []) if c in out.columns]
     out = out.drop(columns=columns_to_drop)
@@ -142,19 +221,41 @@ def clean_dataset(df: pd.DataFrame, diagnostics_config: dict):
     return out, report[report["values"] > 0].reset_index(drop=True)
 
 
-def drop_training_rows(df: pd.DataFrame, diagnostics_config: dict, id_column: str = None):
+def prepare_table(df: pd.DataFrame, config: dict, clientes: pd.DataFrame = None):
+    """clean_dataset + the optional customer-table join: every stateless step, in the order
+    main.py and the notebook use for train.csv and test.csv. Returns (df, cleaning report)."""
+    out, report = clean_dataset(df, config["diagnostics"])
+    customers_config = config.get("customers", {})
+    if customers_config.get("use", False):
+        if clientes is None:
+            clientes = load_data(config["data"]["clientes_path"])
+        out = add_customer_features(out, clientes, customers_config)
+    return out, report
+
+
+def generated_columns(diagnostics_config: dict, customers_config: dict = None) -> set:
+    """Columns the pipeline creates itself (flags, date parts, derived ratios, joined
+    customer fields) -- i.e. every column that did not come from the raw purchase file."""
+    columns = set(diagnostics_config.get("flags", {})) | set(diagnostics_config.get("derived_features", {}))
+    columns |= {f"purchase_{part}" for part in diagnostics_config.get("date_features", [])}
+    if customers_config and customers_config.get("use", False):
+        columns |= set(customers_config["columns"]) | set(customers_config.get("derived_features", {}))
+    return columns
+
+
+def drop_training_rows(df: pd.DataFrame, diagnostics_config: dict, id_column: str = None, customers_config: dict = None):
     """
     TRAINING DATA ONLY, before the dev/test split. Removes:
-      - almost-empty rows: every column except the preserved ones (ids, target) is missing,
-        so imputing them would invent a whole purchase;
+      - almost-empty rows: every column of the purchase file except the preserved ones
+        (ids, target) is missing, so imputing them would invent a whole purchase;
       - exact duplicate rows (ignoring the id) and repeated ids, keeping the first.
 
     Never call this on data we predict for: every Kaggle id needs a prediction.
     Returns (df, report).
     """
     preserved = set(diagnostics_config.get("almost_empty_preserved_columns", []))
-    derived = set(diagnostics_config.get("flags", {}))
-    checked = [c for c in df.columns if c not in preserved | derived]
+    ignored = preserved | generated_columns(diagnostics_config, customers_config)
+    checked = [c for c in df.columns if c not in ignored]
     almost_empty = df[checked].isna().all(axis=1)
     out = df.loc[~almost_empty]
 
@@ -232,8 +333,18 @@ def split_dev_test(X, y, extras, test_set_config: dict, date_column: str = None)
 
 def task_preprocessing_config(config: dict, task: str) -> dict:
     """The shared `preprocessing` section, overridden by `<task>.preprocessing` (each task
-    keeps the encoder/scaler pair its own comparison chose)."""
-    return {**config["preprocessing"], **(config[task].get("preprocessing") or {})}
+    keeps the encoder/scaler pair, imputation and extra features its own comparisons
+    chose). `extra_numeric_features` / `extra_categorical_features` are appended to the
+    shared feature lists; `imputation` keys override the shared ones."""
+    shared = config["preprocessing"]
+    override = dict(config[task].get("preprocessing") or {})
+    merged = {**shared, **override}
+    merged["numeric_features"] = shared["numeric_features"] + override.pop("extra_numeric_features", [])
+    merged["categorical_features"] = shared["categorical_features"] + override.pop("extra_categorical_features", [])
+    merged["imputation"] = {**shared.get("imputation", {}), **override.get("imputation", {})}
+    merged.pop("extra_numeric_features", None)
+    merged.pop("extra_categorical_features", None)
+    return merged
 
 
 _SCALERS = {"none": "passthrough", "standard": StandardScaler, "minmax": MinMaxScaler, "robust": RobustScaler}
@@ -249,14 +360,54 @@ _ENCODERS = {
 }
 
 
+class RareCategoryGrouper(BaseEstimator, TransformerMixin):
+    """
+    Fitted step: learns, from the training rows only, which categories of each column have
+    at least `min_count` rows; every other category -- rare in training, or never seen --
+    becomes `label` at transform time. `min_count=0` disables it.
+    """
+
+    def __init__(self, min_count: int = 0, label: str = "rare"):
+        self.min_count = min_count
+        self.label = label
+
+    def fit(self, X, y=None):
+        X = pd.DataFrame(X)
+        self.frequent_ = [set(X[c].value_counts()[lambda s: s >= self.min_count].index) for c in X.columns]
+        self.n_features_in_ = X.shape[1]
+        return self
+
+    def transform(self, X):
+        X = pd.DataFrame(X).copy()
+        if self.min_count:
+            for c, frequent in zip(X.columns, self.frequent_):
+                X[c] = X[c].where(X[c].isin(frequent), self.label)
+        return X.to_numpy(dtype=object)
+
+    def get_feature_names_out(self, input_features=None):
+        return np.asarray(input_features, dtype=object)
+
+
+def _numeric_imputer(imputation: dict):
+    strategy = imputation.get("numeric_strategy", "median")
+    if strategy == "knn":
+        return KNNImputer(n_neighbors=imputation.get("n_neighbors", 5))
+    if strategy == "iterative":
+        return IterativeImputer(max_iter=imputation.get("max_iter", 10), random_state=imputation.get("random_state", 0))
+    if strategy == "constant":
+        return SimpleImputer(strategy="constant", fill_value=imputation.get("numeric_fill_value", 0))
+    return SimpleImputer(strategy=strategy)
+
+
 def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
     """
     Factory: the leak-safe ColumnTransformer described by config.yaml's `preprocessing`
     section. Nothing is fitted here -- it is fitted later, inside the model's Pipeline, on
     training rows only. Every encoder tolerates categories never seen in training.
 
-    Numeric imputation: "median"/"mean" impute then scale; "knn" scales first so the
-    distances are not dominated by the large-valued columns.
+    Numeric imputation: "median" / "mean" / "constant" impute then scale; "knn" and
+    "iterative" scale first, so distances / regressions are not dominated by the
+    large-valued columns. Categorical: impute, group rare categories, encode.
     """
     numeric_features = preprocessing_config["numeric_features"]
     categorical_features = preprocessing_config["categorical_features"]
@@ -268,17 +419,11 @@ def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
     scaler = scaler_factory() if callable(scaler_factory) else scaler_factory
     encoder = _ENCODERS[preprocessing_config["encoder"]](preprocessing_config.get("random_state"))
 
-    numeric_strategy = imputation.get("numeric_strategy", "median")
-    if numeric_strategy == "knn":
-        numeric_pipeline = Pipeline([
-            ("scale", scaler),
-            ("impute", KNNImputer(n_neighbors=imputation.get("n_neighbors", 5))),
-        ])
+    imputer = _numeric_imputer(imputation)
+    if imputation.get("numeric_strategy", "median") in ("knn", "iterative"):
+        numeric_pipeline = Pipeline([("scale", scaler), ("impute", imputer)])
     else:
-        numeric_pipeline = Pipeline([
-            ("impute", SimpleImputer(strategy=numeric_strategy)),
-            ("scale", scaler),
-        ])
+        numeric_pipeline = Pipeline([("impute", imputer), ("scale", scaler)])
 
     categorical_strategy = imputation.get("categorical_strategy", "most_frequent")
     categorical_pipeline = Pipeline([
@@ -286,6 +431,7 @@ def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
             strategy=categorical_strategy,
             fill_value=imputation.get("categorical_fill_value", "Missing") if categorical_strategy == "constant" else None,
         )),
+        ("group_rare", RareCategoryGrouper(min_count=preprocessing_config.get("rare_category_min_count", 0))),
         ("encode", encoder),
     ])
 

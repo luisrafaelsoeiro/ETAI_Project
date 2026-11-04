@@ -26,11 +26,12 @@ classification:
     - {type: logistic_regression, params: {max_iter: 2000}}
     - {type: decision_tree, params: {max_depth: 5, random_state: 42}}
     - {type: random_forest, params: {n_estimators: 300, min_samples_leaf: 5, n_jobs: -1, random_state: 42}}
-  # encoder x scaler comparison (preprocessing.ipynb section 9): target + standard ranked
-  # first, tied with target + robust (+0.0005 accuracy, SE 0.0006 over 5 paired folds)
+  # encoder x scaler comparison (preprocessing.ipynb section 9): target + standard, tied with
+  # target + minmax / robust (no pair is decisively better -> keep); decisively beats one-hot.
+  # Section 11: none of the new features helps -> original features; section 12: median / mode
   preprocessing: {encoder: target, scaler: standard}
-  # model comparison (section 10): best validation accuracy, smallest train/validation gap;
-  # random forest is 0.006 behind (not decisive) and overfits (train 0.85)
+  # model comparison (section 10): best validation accuracy (0.709), smallest train/validation
+  # gap; random forest is 0.002 behind (not decisive) and overfits (train 0.85)
   model: {type: logistic_regression, params: {max_iter: 2000}}
 
 regression:
@@ -44,10 +45,18 @@ regression:
     - {type: ridge, params: {alpha: 1.0}}
     - {type: decision_tree, params: {max_depth: 5, random_state: 42}}
     - {type: random_forest, params: {n_estimators: 300, min_samples_leaf: 5, n_jobs: -1, random_state: 42}}
-  # ordinal + minmax ranked first, tied with target + minmax (3 RMSE, SE 19): target wins
-  # the tie, because ordinal imposes a meaningless order on unordered categories
-  preprocessing: {encoder: target, scaler: minmax}
-  # lowest validation RMSE; ahead of ridge on 3 of 5 folds (96 RMSE, SE 64: not decisive).
+  # section 9: target + minmax ranks first (ordinal + minmax is a tie, and ordinal would
+  # impose a meaningless order on unordered categories)
+  preprocessing:
+    encoder: target
+    scaler: minmax
+    # section 11: date parts (41 RMSE, 5/5 folds) and customer features (42 RMSE) lower
+    # RMSE; the derived ratios add nothing
+    extra_numeric_features: [purchase_month, purchase_weekday, years_as_customer]
+    extra_categorical_features: [country_or_region, commercial_region, island, municipality]
+    # section 12: an explicit "Missing" category is better on 5/5 folds (island is 34% missing)
+    imputation: {categorical_strategy: constant, categorical_fill_value: Missing}
+  # lowest validation RMSE (1946); ahead of ridge on 3 of 5 folds (90 RMSE, SE 65: not decisive).
   # target_transform: none | log1p -- log1p was decisively worse in euros (section 10)
   model:
     type: random_forest
@@ -65,6 +74,15 @@ test_set:
 validation:
   n_splits: 5
   gap_days: 90
+
+# optional customer table, joined on customer_id (preprocessing.ipynb section 11)
+customers:
+  use: true
+  key: customer_id
+  columns: [country_or_region, commercial_region, island, municipality, customer_since_year]
+  derived_features:
+    years_as_customer: "purchase_date.dt.year - customer_since_year"
+  drop_after_derive: [customer_since_year]
 
 diagnostics:
   date_column: purchase_date
@@ -114,6 +132,32 @@ diagnostics:
   placeholder_values: [1000000000]
   placeholder_columns: [prior_mean_purchase_value, spend_365d]
 
+  # logical rules between columns of the same row, checked only where every term is
+  # observed (preprocessing.ipynb section 5.2). `invalidate`: the value is impossible ->
+  # NaN (then recovered by recompute_rules where possible). No `invalidate`: report only.
+  consistency_rules:
+    - {rule: "abs(gross_total - line_discount_total - global_discount_total - net_total) <= 0.05"}
+    - {rule: "abs(net_total + total_tax - total_payable) <= 0.05"}   # shipping is not in total_payable
+    - {rule: "purchase_count_30d <= purchase_count_90d"}
+    - {rule: "purchase_count_90d <= purchase_count_180d"}
+    - {rule: "purchase_count_180d <= purchase_count_365d"}
+    - {rule: "purchase_count_365d <= prior_purchase_count"}
+    - {rule: "spend_30d <= spend_90d + 0.01"}
+    - {rule: "spend_90d <= spend_180d + 0.01"}
+    - {rule: "spend_180d <= spend_365d + 0.01"}
+    - {rule: "prior_min_purchase_value <= prior_max_purchase_value + 0.01"}
+    - {rule: "days_since_previous_purchase <= customer_tenure_days + 0.5"}
+    - {rule: "line_item_count >= 1"}
+    - {rule: "invoice_count_current_purchase >= 1"}
+    # 39 train rows sold below cost, mostly after big line discounts: plausible -> kept
+    - {rule: "cost <= net_total"}
+    # last-365-day spend cannot exceed all prior spend: 39 train rows are 1.5-23x too high
+    - {rule: "spend_365d <= prior_total_spend + 0.01", invalidate: spend_365d}
+    # the prior mean must equal total / count: 46 train rows are 8-25x too high (above the max)
+    - rule: "abs(prior_mean_purchase_value - prior_total_spend / prior_purchase_count) <= 0.6 + 0.001 * prior_mean_purchase_value"
+      when: "prior_purchase_count > 0"
+      invalidate: prior_mean_purchase_value
+
   # NaN -> value implied by an identity between columns of the same row
   # (each identity holds for >= 99% of the rows where all terms are observed)
   recompute_rules:
@@ -150,8 +194,20 @@ diagnostics:
     is_first_purchase: "prior_purchase_count == 0"
     has_gap_history: "prior_purchase_count >= 2"
 
-  # gross_total = net_total + line + global discounts (exact, 100% of rows);
-  # total_payable vs net_total correlation 0.996
+  # purchase-time features (preprocessing.ipynb section 11): only information known at the
+  # moment of the purchase -- the date itself, and ratios of columns of the same row.
+  # All are computed; each task selects the ones its ablation kept (regression: date parts)
+  date_features: [month, weekday]
+  derived_features:
+    margin: "net_total - cost"
+    margin_rate: "(net_total - cost) / net_total"
+    discount_rate: "(line_discount_total + global_discount_total) / gross_total"
+    avg_line_value: "net_total / line_item_count"
+    spend_share_30d: "spend_30d / (spend_365d + 1)"
+    spend_share_90d: "spend_90d / (spend_365d + 1)"
+
+  # exact sums of other columns (100% of rows): gross_total = net_total + line + global
+  # discounts; total_payable = net_total + total_tax
   redundant_columns: [gross_total, total_payable]
 
   # rows where everything except these is missing are dropped from training
@@ -198,8 +254,11 @@ preprocessing:
   # tenure, so a median alone would pull them towards short-tenure spend
   mnar_indicator_sources: [spend_365d]
   imputation:
-    numeric_strategy: median
+    numeric_strategy: median          # median | mean | constant | knn | iterative (section 12)
     categorical_strategy: most_frequent
+  # 0 = off. Grouping categories under N training rows into "rare" was worse for both
+  # tasks (section 11): the target encoder already shrinks rare categories
+  rare_category_min_count: 0
   # shared default; each task overrides it with the pair its own comparison chose
   # (classification.preprocessing / regression.preprocessing)
   encoder: target
