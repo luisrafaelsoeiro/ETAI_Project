@@ -137,6 +137,7 @@ The project also requires that all features used for prediction are available at
 | Data diagnosis | Column standardisation, invalid values, placeholder, almost-empty rows, category text, target missingness, date checks, duplicates | `preprocessing.ipynb` sections 1–4 |
 | Preprocessing → pipeline | Diagnosis turned into config-driven rules; identity recovery; structural missingness; missingness-mechanism tests; temporal locked test set; leak-safe `ColumnTransformer` | `src/preprocessing.py`, `config.yaml`, notebook sections 5–8 |
 | Encoder × scaler + models | Temporal cross-validation, 16-recipe comparison per task, paired comparisons, Pipeline with dummy / linear / tree / random forest | `src/evaluate.py`, `*/model.py`, notebook sections 9–10 |
+| Regression target + notebook clean-up | Missing-spend mechanism tested (not MCAR), `log1p` target tested and rejected. Notebook sections 1–4 now call the `src/` functions and read every list and value from `config.yaml`; duplicate check is diagnostic only (test.csv never filtered); table of contents with unique anchors; the per-feature plots replaced by a test table + verdict; executed top to bottom | `regression/model.py`, `preprocessing.ipynb` |
 
 ---
 
@@ -216,12 +217,17 @@ These gaps aren't MCAR, MAR or MNAR: the value is *not applicable*. A median wou
 | Exact duplicates (ignoring `id`) | 0 | checked; none found |
 | Repeated ids | 0 | checked; none found |
 
-This runs on the labelled training file only, before the split. Training goes from 6,534 to 6,469 rows. **test.csv keeps all 986 rows.**
+This runs on the labelled training file only, before the split. Training goes from 6,534 to 6,469 rows. **test.csv keeps all 986 rows**, and the notebook asserts it. The duplicate check in notebook section 4 is diagnostic only. It looks at all columns and at all columns except `id` (a unique `id` would otherwise hide every duplicate), and also checks whether any test row is identical to a training row: none is.
 
 ### 8. Targets
 
 * **`repeat_purchase_90d`** is complete. It is never imputed, and the pipeline raises an error if a label is missing.
-* **`spend_next_90d`** is missing for 100% of non-repeaters (no return → no spend) and for 5.4% of repeaters. Targets are never imputed. The regressor trains only on repeat purchasers with an observed spend (`regression.row_filter`), and its preprocessing is fitted on those rows only.
+* **`spend_next_90d`** is missing for 100% of non-repeaters (no return → no spend, structural) and for 196 of 3,621 repeaters (5.4%). Those 5.4% are **not missing at random** (notebook section 2.5):
+  * They are concentrated at the edges of the data. The spend is missing for 16.8% of 2015 purchases, 11.6% of 2024 purchases and 49% of 2025 purchases, against 1.3–4.9% in the years in between. This looks like the 90-day spend not being fully recorded at the edges of the extract.
+  * 13 of 32 features are significantly related to it. The rows come from customers with a shorter, lower-value history (median 8.5 vs 17 prior purchases, 365-day spend ≈ 1,973 € vs 4,644 €).
+
+  Targets are never imputed: that would mean training on our own guesses. The regressor trains only on repeat purchasers with an observed spend (`regression.row_filter`), and its preprocessing is fitted on those rows only. As a consequence, the regression training rows slightly over-represent longer, higher-value histories, and the most recent months have fewer usable regression rows.
+* **Target transform:** the spend is right-skewed (skew 2.4 on the development rows; −0.6 after `log1p`). Fitting on `log1p(spend)` (`TransformedTargetRegressor`, `regression.model.target_transform`) was tested on the same folds. It is **decisively worse in RMSE for every model, on every fold** (random forest +345, decision tree +191, ridge +1,194), and the mean MAE is worse too. Once transformed back, a log-scale model predicts something close to the median and underestimates the large spenders. So the target stays in euros (`target_transform: none`). The option is kept for a log-scale metric such as RMSLE.
 
 ### 9. Mechanism of the remaining gaps
 
@@ -286,7 +292,7 @@ Preprocessing and model are a single sklearn `Pipeline`, so `fit` learns everyth
 | Random forest (300 trees) | 0.849 / 0.709 | 1008 / **2008** |
 
 * **Classification → logistic regression.** It has the best validation accuracy, it beats the dummy on every fold (+0.16), and train ≈ validation, so it doesn't overfit. The random forest is 0.006 behind (not decisive) and overfits.
-* **Regression → random forest.** It has the lowest validation RMSE (R² ≈ 0.30) and beats the dummy on every fold (−464 RMSE). Its edge over ridge is not decisive (96 ± 64, better on 3 of 5 folds), and it overfits clearly. Hyperparameter tuning should address that.
+* **Regression → random forest, target in euros.** It has the lowest validation RMSE (R² ≈ 0.30) and beats the dummy on every fold (−464 RMSE). Its edge over ridge is not decisive (96 ± 64, better on 3 of 5 folds), and it overfits clearly. Hyperparameter tuning should address that. A `log1p` target made every model worse (section 8).
 
 The main metric is accuracy for classification and RMSE for regression (`<task>.metric`). F1, ROC-AUC, MAE and R² are also reported.
 
@@ -294,11 +300,9 @@ The main metric is accuracy for classification and RMSE for regression (`<task>.
 
 Still to do in preprocessing (details in `PREPROCESSING_TODO.md`):
 
-* Fix the old notebook sections 1–4: duplicate removal is also applied to test.csv there, and some functions are duplicated from `src/`.
 * Investigate `net_total + total_tax + shipping_cost = total_payable`, which holds for only 83.7% of rows.
 * Group the rare levels of `transport_method` (80 levels, 40 with fewer than 10 rows).
 * Decide on skew and outliers column by column, and rewrite `2.Outlier_detection.ipynb` for this dataset (it still refers to columns from another project).
-* Use a `log1p` target transform for the regression (target skew 3.0).
 * Try merging `clientes.csv`.
 * Compare alternative imputers (KNN, iterative) inside cross-validation.
 

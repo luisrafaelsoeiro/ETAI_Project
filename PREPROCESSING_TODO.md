@@ -49,26 +49,27 @@ Facts below marked 🔎 were checked on the raw data while writing this list.
 - [x] CV inside the development set = 5 expanding-window temporal folds with the same 90-day gap (`validation`, `src/evaluate.py` → `temporal_folds`).
 - [ ] Optional: compare against `GroupKFold` on `customer_id` to show how optimistic a random/grouped split would be.
 
-### 8. Regression-specific preprocessing
-- [ ] 🔎 `spend_next_90d` is missing for 100 % of non-repeaters (structural, correct to exclude) and for 5.4 % of repeaters → state the verdict for those (can't impute a target; exclude and explain).
-- [ ] Fit the regression preprocessor **only on the regression rows** (repeaters with observed spend), not on the classification set.
-- [ ] 🔎 Target skew = 3.0 and no zeros → try `TransformedTargetRegressor(func=np.log1p, inverse_func=np.expm1)`.
+### 8. Regression-specific preprocessing ✅ (notebook sections 2.5, 10)
+- [x] Missing spend among repeaters (196 / 3,621 = 5.4%) tested: **not MCAR**. Concentrated at the data edges (2015 16.8%, 2024 11.6%, 2025 49% vs 1–5% in between), and related to 13 of 32 features (shorter, lower-value histories). Never imputed: the regressor trains on observed rows only; consequence documented.
+- [x] Regression preprocessor fitted only on the regression rows (`regression.select_training_rows()` before the split).
+- [x] `log1p` target (`TransformedTargetRegressor`, `regression.model.target_transform`) tested: decisively worse in RMSE for every model on every fold (RF +345, tree +191, ridge +1194) → `target_transform: none`.
 
-### 9. Fix bugs / weaknesses in the current notebook
-- [ ] `validate_and_handle_duplicates(remove_exact=True)` drops rows from **test** too. Kaggle needs a prediction for all 986 IDs → de-duplicate train only and `assert len(test_clean) == 986`.
-- [ ] Exact-duplicate check includes `id`, which is always unique, so it can never find a duplicate → also check with `subset` = all columns except `id` (🔎 result: 0 duplicates — report it).
-- [ ] The 65 almost-empty rows are dropped mid-cleaning (cell 15) using a mask built on another frame (`train`) — move it into the training-only function.
-- [ ] `1_000_000_000`, column lists, `SEED` → config.
-- [ ] Cells 9, 15, 17, 21, 23, 25, 27, 30 have **no outputs** → *Restart & Run All* before submitting. Cell 31 is empty.
-- [ ] Every section links to `#toc` but there is no Table of Contents, and every anchor has `id="1"` → add a TOC with unique anchors.
-- [ ] Cells 18–19 produce one plot per feature (dozens) with no written conclusion → summarise in a table + 2–3 sentences of verdict.
-- [ ] Non-ASCII characters show up as `�` in some comments (e.g. "1st–99th") → re-save the notebook as UTF-8.
+### 9. Fix bugs / weaknesses in the current notebook ✅
+- [x] Duplicate check is diagnostic only (`duplicate_diagnostics`); test.csv is never filtered and `assert len(test_clean) == 986`.
+- [x] Duplicate check also ignores `id` (0 duplicates either way; 0 test rows identical to a train row).
+- [x] Almost-empty rows: diagnosed in 2.1, removed by `drop_training_rows()` in the new 2.4 (training only).
+- [x] Column renames, non-negative columns, placeholder value, categorical columns, preserved columns and paths all read from `config.yaml`; `SEED` removed (seeds live in config).
+- [x] Notebook functions duplicated from `src/` removed (`standardize_columns`, `replace_invalid_values`); all imports and the config load moved to section 0.
+- [x] Notebook executed top to bottom in a fresh kernel, outputs saved (empty cell removed).
+- [x] Table of contents added, every section has a unique anchor.
+- [x] The dozens of per-feature plots (old 2.4) replaced by one test table, one by-year chart and a written verdict.
+- [x] `�` characters: not actually in the notebook (it was a console encoding artefact) → nothing to fix.
 
 ### 10. Drop non-informative and leaky columns (and say why)
 - [x] 🔎 `random_noise` — literally noise (corr with target −0.012). Dropped.
 - [x] `id`, `customer_id`, `purchase_date` → kept in `extras`, never model inputs.
 - [x] Both targets are removed from `X` for both tasks (`data.target_columns`).
-- [ ] ✅ Redundancy: `gross_total` (exact sum) and `total_payable` (corr 0.996 with `net_total`) dropped in `config.yaml`.
+- [x] Redundancy: `gross_total` (exact sum) and `total_payable` (corr 0.996 with `net_total`) dropped in `config.yaml`.
 
 ---
 

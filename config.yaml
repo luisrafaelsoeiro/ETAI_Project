@@ -47,8 +47,12 @@ regression:
   # ordinal + minmax ranked first, tied with target + minmax (3 RMSE, SE 19): target wins
   # the tie, because ordinal imposes a meaningless order on unordered categories
   preprocessing: {encoder: target, scaler: minmax}
-  # lowest validation RMSE; ahead of ridge on 3 of 5 folds (96 RMSE, SE 64: not decisive)
-  model: {type: random_forest, params: {n_estimators: 300, min_samples_leaf: 5, n_jobs: -1, random_state: 42}}
+  # lowest validation RMSE; ahead of ridge on 3 of 5 folds (96 RMSE, SE 64: not decisive).
+  # target_transform: none | log1p -- log1p was decisively worse in euros (section 10)
+  model:
+    type: random_forest
+    params: {n_estimators: 300, min_samples_leaf: 5, n_jobs: -1, random_state: 42}
+    target_transform: none
 
 # locked test set: never used to fit, tune, compare or choose anything
 test_set:
