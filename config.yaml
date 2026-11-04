@@ -18,17 +18,49 @@ data:
 
 classification:
   target: repeat_purchase_90d
+  metric: accuracy        # primary metric for every comparison (f1 and roc_auc also reported)
+  # scaling-sensitive model used to compare encoder x scaler pairs (trees ignore scaling)
+  comparison_model: {type: logistic_regression, params: {max_iter: 2000}}
+  candidate_models:
+    - {type: dummy, params: {strategy: most_frequent}}
+    - {type: logistic_regression, params: {max_iter: 2000}}
+    - {type: decision_tree, params: {max_depth: 5, random_state: 42}}
+    - {type: random_forest, params: {n_estimators: 300, min_samples_leaf: 5, n_jobs: -1, random_state: 42}}
+  # encoder x scaler comparison (preprocessing.ipynb section 9): target + standard ranked
+  # first, tied with target + robust (+0.0005 accuracy, SE 0.0006 over 5 paired folds)
+  preprocessing: {encoder: target, scaler: standard}
+  # model comparison (section 10): best validation accuracy, smallest train/validation gap;
+  # random forest is 0.006 behind (not decisive) and overfits (train 0.85)
+  model: {type: logistic_regression, params: {max_iter: 2000}}
 
 regression:
   target: spend_next_90d
   # trained only on repeat purchasers with an observed spend (targets are never imputed)
   row_filter: "repeat_purchase_90d == 1 and spend_next_90d.notna()"
+  metric: rmse            # primary metric (mae and r2 also reported)
+  comparison_model: {type: ridge, params: {alpha: 1.0}}
+  candidate_models:
+    - {type: dummy, params: {strategy: mean}}
+    - {type: ridge, params: {alpha: 1.0}}
+    - {type: decision_tree, params: {max_depth: 5, random_state: 42}}
+    - {type: random_forest, params: {n_estimators: 300, min_samples_leaf: 5, n_jobs: -1, random_state: 42}}
+  # ordinal + minmax ranked first, tied with target + minmax (3 RMSE, SE 19): target wins
+  # the tie, because ordinal imposes a meaningless order on unordered categories
+  preprocessing: {encoder: target, scaler: minmax}
+  # lowest validation RMSE; ahead of ridge on 3 of 5 folds (96 RMSE, SE 64: not decisive)
+  model: {type: random_forest, params: {n_estimators: 300, min_samples_leaf: 5, n_jobs: -1, random_state: 42}}
 
 # locked test set: never used to fit, tune, compare or choose anything
 test_set:
   strategy: temporal     # test.csv lies strictly after train.csv in time
   size: 0.2
+  gap_days: 90           # dev rows whose 90-day label window reaches into the test period are left out
   random_state: 42       # only used by strategy "stratified"
+
+# cross-validation inside the development set: expanding-window temporal folds
+validation:
+  n_splits: 5
+  gap_days: 90
 
 diagnostics:
   date_column: purchase_date
@@ -164,8 +196,8 @@ preprocessing:
   imputation:
     numeric_strategy: median
     categorical_strategy: most_frequent
-  # target: one column per feature (transport_method has 80 levels); robust: skewed
-  # amounts with extreme values. To be confirmed by the encoder x scaler comparison.
+  # shared default; each task overrides it with the pair its own comparison chose
+  # (classification.preprocessing / regression.preprocessing)
   encoder: target
   scaler: robust
   random_state: 42

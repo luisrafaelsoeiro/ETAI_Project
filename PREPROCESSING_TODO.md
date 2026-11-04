@@ -28,27 +28,26 @@ Facts below marked 🔎 were checked on the raw data while writing this list.
 - [x] Verdict table in the notebook (section 6).
 
 ### 4. Leak-safe `build_preprocessor()` ✅ (notebook section 8)
-- [x] numeric: median → robust scaler (`knn` option available); categorical: most frequent → target encoder (`target_type="auto"`, so it works for both tasks); flags passed through. 35 model-ready columns.
+- [x] numeric: median → scaler chosen per task in item 5 (`knn` option available); categorical: most frequent → target encoder (`target_type="auto"`, so it works for both tasks); flags passed through. 35 model-ready columns.
 - [x] Fitted on development rows only; locked test and test.csv transformed with 0 NaN; unseen categories demo (they get the overall target mean).
 
-### 7. (done early, needed by item 1) Temporal locked test set ✅
-- [x] `test_set.strategy: temporal`: the latest 20% of purchases (2023-06 → 2025-02) is the locked test set, matching test.csv lying after train.csv. CV inside the development set (`TimeSeriesSplit` / `GroupKFold`) is still to do with the model work.
+### 5. Choose encoder × scaler with evidence ✅ (notebook section 9)
+- [x] 4 encoders × 4 scalers scored with a scaling-sensitive model (logistic regression / ridge) on the **same 5 temporal folds** of the development set (`src/evaluate.py` → `compare_encoders_scalers`), with a heatmap per task.
+- [x] Paired comparisons (`paired_comparison`, mean advantage vs 2·SE).
+- [x] Classification → **target + standard** (0.7148 accuracy; tied with target + robust, +0.0005 ± 0.0006; decisively better than one-hot + robust).
+- [x] Regression → **target + minmax** (RMSE 2104; tied with ordinal + minmax, 3 ± 19 → tie goes to target, because ordinal imposes a fake order).
+- [x] Stored per task in `config.yaml` → `classification.preprocessing` / `regression.preprocessing`, merged by `task_preprocessing_config()`.
 
-### 5. Choose encoder × scaler with evidence (02 notebook Step 4–5)
-- [ ] Grid of 4 encoders × 4 scalers, repeated splits, mean ± std (classification: accuracy/F1; regression: RMSE/MAE).
-- [ ] Paired comparison winner vs runner-up (mean diff vs 2·SE).
-- [ ] Ordinal encoder only with an explicit order (none of your categoricals is ordered → avoid with linear models).
-- [ ] Write the winner and the reason into `config.yaml` (don't hardcode a guess).
+### 6. Recipe + model = one `Pipeline` ✅ (notebook section 10)
+- [x] `make_pipeline()` = `Pipeline([("prep", build_preprocessor(...)), ("model", build_model(...))])`; `classification/model.py` and `regression/model.py` hold the model factories.
+- [x] Dummy baselines: classification 0.553 accuracy, regression 2472 RMSE.
+- [x] Train vs validation for 4 candidates per task. Chosen: **logistic regression** (0.715 val, no overfitting; random forest 0.709, overfits) and **random forest regressor** (2008 val RMSE, R² 0.30; ahead of ridge 96 ± 64, not decisive; overfits: train 1008 → tune later).
+- [x] `python main.py` cross-validates the configured model vs the dummy and fits the final pipeline on the development rows. The locked test set is still untouched.
 
-### 6. Recipe + model = one `Pipeline`
-- [ ] `Pipeline([("prep", ...), ("model", ...)])` for classification **and** regression.
-- [ ] `DummyClassifier` / `DummyRegressor` baseline (the floor to beat).
-- [ ] Report train vs validation score.
-
-### 7. Validation split that matches how the test set was built ⚠️ biggest risk
-- [ ] 🔎 `test.csv` is **strictly in the future**: train dates 2015-07-11 → 2025-02-15, test dates 2025-05-24 → 2026-10-06. Your §3 check prints this but the conclusion isn't used anywhere.
-- [ ] 🔎 607 customers generate 6,469 train rows, and 184 of the 206 test customers already appear in train. A random stratified split puts the same customer (and overlapping 90-day windows) on both sides → optimistic scores.
-- [ ] → Use a **temporal hold-out** (last ~15–20 % of train by `purchase_date`) as the locked test set, and `TimeSeriesSplit` (or `GroupKFold` on `customer_id`) for CV. Justify the choice in markdown and store it in config.
+### 7. Validation split that matches how the test set was built ✅
+- [x] Locked test set = latest 20% of purchases (2023-06 → 2025-02), with a 90-day gap (`test_set.gap_days`) so no development label window reaches into it.
+- [x] CV inside the development set = 5 expanding-window temporal folds with the same 90-day gap (`validation`, `src/evaluate.py` → `temporal_folds`).
+- [ ] Optional: compare against `GroupKFold` on `customer_id` to show how optimistic a random/grouped split would be.
 
 ### 8. Regression-specific preprocessing
 - [ ] 🔎 `spend_next_90d` is missing for 100 % of non-repeaters (structural, correct to exclude) and for 5.4 % of repeaters → state the verdict for those (can't impute a target; exclude and explain).

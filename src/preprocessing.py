@@ -209,6 +209,8 @@ def split_dev_test(X, y, extras, test_set_config: dict, date_column: str = None)
     strategy "temporal" (default): the latest `size` share of purchases becomes the test
     set, because test.csv itself lies strictly after train.csv in time -- a random split
     would let the model see the future of the very customers it is evaluated on.
+    `gap_days` leaves out the development rows of the last days before the test period:
+    their 90-day labels are measured inside it.
     strategy "stratified": a random stratified split (kept for comparison only).
     """
     strategy = test_set_config.get("strategy", "temporal")
@@ -218,13 +220,20 @@ def split_dev_test(X, y, extras, test_set_config: dict, date_column: str = None)
         dates = extras[date_column]
         cutoff = dates.quantile(1 - size)
         is_test = (dates > cutoff).to_numpy()
-        return X[~is_test], X[is_test], y[~is_test], y[is_test], extras[~is_test], extras[is_test]
+        is_dev = (dates <= cutoff - pd.Timedelta(days=test_set_config.get("gap_days", 0))).to_numpy()
+        return X[is_dev], X[is_test], y[is_dev], y[is_test], extras[is_dev], extras[is_test]
 
     if strategy == "stratified":
         return train_test_split(
             X, y, extras, test_size=size, random_state=test_set_config["random_state"], stratify=y,
         )
     raise ValueError(f"Unknown test_set strategy: {strategy}. Options: ['temporal', 'stratified']")
+
+
+def task_preprocessing_config(config: dict, task: str) -> dict:
+    """The shared `preprocessing` section, overridden by `<task>.preprocessing` (each task
+    keeps the encoder/scaler pair its own comparison chose)."""
+    return {**config["preprocessing"], **(config[task].get("preprocessing") or {})}
 
 
 _SCALERS = {"none": "passthrough", "standard": StandardScaler, "minmax": MinMaxScaler, "robust": RobustScaler}
