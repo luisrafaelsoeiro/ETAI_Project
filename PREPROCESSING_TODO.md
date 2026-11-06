@@ -49,7 +49,7 @@ Facts below marked 🔎 were checked on the raw data while writing this list.
 - [x] CV inside the development set = 5 expanding-window temporal folds with the same 90-day gap (`validation`, `src/evaluate.py` → `temporal_folds`).
 - [ ] Optional: compare against `GroupKFold` on `customer_id` to show how optimistic a random/grouped split would be.
 
-### 8. Regression-specific preprocessing ✅ (notebook sections 2.5, 10)
+### 8. Regression-specific preprocessing ✅ (notebook sections 2.6, 10)
 - [x] Missing spend among repeaters (196 / 3,621 = 5.4%) tested: **not MCAR**. Concentrated at the data edges (2015 16.8%, 2024 11.6%, 2025 49% vs 1–5% in between), and related to 13 of 32 features (shorter, lower-value histories). Never imputed: the regressor trains on observed rows only; consequence documented.
 - [x] Regression preprocessor fitted only on the regression rows (`regression.select_training_rows()` before the split).
 - [x] `log1p` target (`TransformedTargetRegressor`, `regression.model.target_transform`) tested: decisively worse in RMSE for every model on every fold (RF +345, tree +191, ridge +1194) → `target_transform: none`.

@@ -238,7 +238,7 @@ These gaps aren't MCAR, MAR or MNAR: the value is *not applicable*. A median wou
 
 This runs on the labelled training file only, before the split. Training goes from 6,534 to 6,469 rows. **test.csv keeps all 986 rows**, and the notebook asserts it. The almost-empty check ignores the columns the pipeline creates itself (flags, date parts, ratios, customer fields), so a joined customer field can't hide an empty purchase. The duplicate check in section 4 is diagnostic only. It looks at all columns and at all columns except `id` (a unique `id` would otherwise hide every duplicate), and also checks whether any test row is identical to a training row: none is.
 
-### 9. Targets [2.5, 10]
+### 9. Targets [2.6, 10]
 
 * **`repeat_purchase_90d`** is complete. It is never imputed, and the pipeline raises an error if a label is missing.
 * **`spend_next_90d`** is missing for 100% of non-repeaters (no return → no spend, structural) and for 196 of 3,621 repeaters (5.4%). Those 5.4% are **not missing at random**:

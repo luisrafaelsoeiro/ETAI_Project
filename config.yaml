@@ -16,6 +16,36 @@ data:
   # random_noise: pure noise (corr with target -0.012), see preprocessing.ipynb section 5
   drop_columns: [random_noise]
 
+# Compact storage types applied after the stateless cleaning rules. Monetary values and
+# calculated statistics remain float64. days_since_previous_purchase also stays float64
+# because an identity can recover a small number of fractional estimates.
+dtypes:
+  Int8: [repeat_purchase_90d]
+  Int16:
+    - line_item_count
+    - invoice_count_current_purchase
+    - customer_tenure_days
+    - prior_purchase_count
+    - purchase_count_30d
+    - purchase_count_90d
+    - purchase_count_180d
+    - purchase_count_365d
+    - purchase_month
+    - purchase_weekday
+    - years_as_customer
+  Int32: [id, customer_id]
+  category:
+    - payment_type
+    - salesperson
+    - commercial_zone
+    - transport_method
+    - warehouse
+    - document_series
+    - country_or_region
+    - commercial_region
+    - island
+    - municipality
+
 classification:
   target: repeat_purchase_90d
   metric: accuracy        # primary metric for every comparison (f1 and roc_auc also reported)

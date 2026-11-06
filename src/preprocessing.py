@@ -221,6 +221,20 @@ def clean_dataset(df: pd.DataFrame, diagnostics_config: dict):
     return out, report[report["values"] > 0].reset_index(drop=True)
 
 
+def standardize_dtypes(df: pd.DataFrame, dtype_config: dict) -> pd.DataFrame:
+    """Apply the compact pandas data types listed in config.yaml.
+
+    Missing integer values use pandas' nullable integer types. Monetary values and
+    calculated statistics are deliberately left as float64.
+    """
+    out = df.copy()
+    for dtype, columns in dtype_config.items():
+        for column in columns:
+            if column in out.columns:
+                out[column] = out[column].astype(dtype)
+    return out
+
+
 def prepare_table(df: pd.DataFrame, config: dict, clientes: pd.DataFrame = None):
     """clean_dataset + the optional customer-table join: every stateless step, in the order
     main.py and the notebook use for train.csv and test.csv. Returns (df, cleaning report)."""
@@ -230,6 +244,7 @@ def prepare_table(df: pd.DataFrame, config: dict, clientes: pd.DataFrame = None)
         if clientes is None:
             clientes = load_data(config["data"]["clientes_path"])
         out = add_customer_features(out, clientes, customers_config)
+    out = standardize_dtypes(out, config.get("dtypes", {}))
     return out, report
 
 
