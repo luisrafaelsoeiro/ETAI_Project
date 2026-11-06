@@ -42,20 +42,49 @@ The project is divided into several main objectives:
 ## How to Run
 
 ```bash
+python -m venv .venv
+.venv\Scripts\activate                  # Windows; macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-python main.py                          # both tasks
-python main.py --task classification    # or: --task regression
-python tests/test_pipeline.py           # checks of the preprocessing pipeline (8 tests)
 ```
 
-For each task, `main.py`:
-1. validates and cleans the data, and reports placeholders, schema problems and `customer_id` problems;
-2. sets the locked test set aside and checks the feature lists;
-3. cross-validates the configured model against a dummy baseline on the development set;
-4. fits the final pipeline on the development rows and saves it to `models/<task>_pipeline.joblib`;
-5. loads the saved file back and checks that the loaded copy predicts test.csv and a single raw record identically.
+```bash
+python main.py                          # both tasks: classification, then regression
+python main.py --task classification    # or: --task regression
+python tests/test_pipeline.py           # 10 automated checks of the pipeline (or: python -m pytest tests)
+```
 
-Every choice is read from `config.yaml`.
+The notebooks in `notebooks/` run with the same environment and find the project root themselves.
+
+### What `python main.py` does, per task
+
+1. **Load and validate**: placeholder tokens → `NaN`, placeholder report, schema validation (types, ranges, allowed categories) and `customer_id` checks.
+2. **Clean** with stateless rules (train.csv and test.csv alike), join the customer table, and remove almost-empty rows and duplicates from the training file only.
+3. **Lock the temporal test set**: the latest 20% of purchases, with a 90-day gap.
+4. **Cross-validate** the configured pipeline (preprocessing + model) on 5 expanding-window temporal folds, against a dummy floor, on every configured metric. The out-of-fold predictions feed the report.
+5. **Optional tuning:** Optuna with nested temporal cross-validation.
+6. **Refit** the selected pipeline on all development rows, and add a row to the scoreboard.
+7. **Optional, only for the final chosen models:** evaluate once on the locked test set.
+8. **Save** the fitted pipeline, reload it, and check that the reloaded copy predicts identically. Then write the test.csv predictions and the full run report.
+
+| Output | Content |
+|---|---|
+| `results/runs.csv` | scoreboard: one row per run and task (model, recipe, CV mean ± std, per-fold scores, untuned score, dummy floor) |
+| `results/<task>_<model>_<run>.txt` | full report: validation summary, per-fold scores, overfitting gap, tuning, out-of-fold report (confusion matrix / errors by spend band), locked-test report when enabled |
+| `results/predictions/classification.csv` | test.csv predictions in the Kaggle format (`ID`, `repeat_purchase_90d`), checked against `sample_submission.csv` |
+| `results/predictions/regression.csv` | test.csv predictions (`ID`, `spend_next_90d`) |
+| `models/<task>_pipeline.joblib` | fitted pipeline (preprocessing + model), ready for `src/pipeline.py` → `load_pipeline()` / `predict_new_records()` |
+
+`results/` and `models/` are generated and git-ignored.
+
+### Changing the experiment (`config.yaml`)
+
+| To… | Edit |
+|---|---|
+| try another model | `<task>.model.type` and `params`. Options: dummy, logistic_regression / ridge, decision_tree, random_forest, gradient_boosting, hist_gradient_boosting, xgboost |
+| tune it | `<task>.tuning.enabled: true` (search spaces in `<task>.tuning.search_spaces`, keyed by model type) |
+| change the metrics | `<task>.metrics` and `<task>.selection_metric` (options in `<task>/evaluate.py` → `SCORING`) |
+| change the recipe | `<task>.preprocessing` (encoder, scaler, imputation, extra features) or the shared `preprocessing` section |
+| score the locked test set (final models only) | `test_set.evaluate: true`, plus `refit_on_all_rows: true` to refit on every labelled row afterwards |
 
 ---
 
@@ -64,80 +93,64 @@ Every choice is read from `config.yaml`.
 ```text
 ETAI_Project/
 │
-├── config.yaml                  # every rule and choice (no fitted values)
-├── main.py                      # terminal entry point: validate, clean, evaluate, fit, save, reload, predict
-├── preprocessing.ipynb          # diagnosis + evidence for every preprocessing decision
-├── outlier_detection.ipynb      # outlier analysis and decision for this dataset
-├── 2.Outlier_detection.ipynb    # first outlier exploration (superseded by outlier_detection.ipynb)
-├── PREPROCESSING_TODO.md        # preprocessing checklist
-├── README.md
+├── main.py                         # entry point: python main.py [--task classification|regression|both]
+├── config.yaml                     # every rule and choice, in pipeline order (no fitted values)
 ├── requirements.txt
+├── README.md
 │
-├── src/                         # shared by both tasks
-│   ├── preprocessing.py         # loading, validation, cleaning rules, row decisions, split, ColumnTransformer
-│   └── evaluate.py              # temporal folds, cross-validation, comparisons
+├── data/
+│   ├── README.md                   # data dictionary
+│   └── raw/                        # train.csv, test.csv, clientes.csv, sample_submission.csv (never modified)
 │
-├── classification/
-│   ├── preprocessing.py         # training rows + (X, y, extras) for repeat_purchase_90d
-│   ├── model.py                 # classification model factory
-│   ├── evaluate.py, results.py, tuning.py   # (not used yet)
+├── notebooks/                      # evidence for every decision (they import the pipeline's own code)
+│   ├── 01_preprocessing.ipynb      # diagnosis, cleaning, missingness, recipe, encoder x scaler, models, ablations, imputers
+│   └── 02_outlier_detection.ipynb  # data errors vs valid extremes, transformations and row removal in temporal CV
 │
-├── regression/
-│   ├── preprocessing.py         # training rows + (X, y, extras) for spend_next_90d
-│   ├── model.py                 # regression model factory
-│   ├── evaluate.py, results.py, tuning.py   # (not used yet)
+├── src/                            # shared by both tasks
+│   ├── data.py                     # loading, placeholder report, column names, schema and customer_id validation, dtypes
+│   ├── cleaning.py                 # stateless cleaning rules, prepare_table, training-only row removal
+│   ├── preprocessing.py            # (X, y, extras), locked test split, the fitted recipe (ColumnTransformer)
+│   ├── pipeline.py                 # build / save / load the pipeline, prepare_task_data, predict_new_records
+│   ├── evaluate.py                 # temporal folds, cross-validation, comparisons, CV report
+│   ├── tuning.py                   # Optuna tuning, nested temporal cross-validation, tuning reports
+│   ├── results.py                  # scoreboard, run reports, prediction files
+│   └── tasks.py                    # registry of the two task packages
+│
+├── classification/                 # only what is specific to repeat_purchase_90d
+│   ├── preprocessing.py            # training rows, (X, y, extras)
+│   ├── model.py                    # classifier registry
+│   └── evaluate.py                 # metrics (SCORING), probability for the reports, confusion-matrix reports
+│
+├── regression/                     # only what is specific to spend_next_90d
+│   ├── preprocessing.py            # training rows (repeaters with an observed spend), (X, y, extras)
+│   ├── model.py                    # regressor registry, optional log1p target transform
+│   └── evaluate.py                 # metrics (SCORING), error reports by spend band
 │
 ├── tests/
-│   └── test_pipeline.py         # pipeline checks (python tests/test_pipeline.py, or pytest)
+│   └── test_pipeline.py            # 10 checks: feature lists, indicators, leakage, cleaning, schema,
+│                                   # placeholders, save/load/predict, tuning, Kaggle format
 │
-├── models/                      # fitted pipelines written by main.py (git-ignored)
-├── Self_utils/                  # plotting/outlier helpers used by 2.Outlier_detection.ipynb
-│
-└── data/
-    └── raw/                     # train.csv, test.csv, clientes.csv, sample_submission.csv
+├── results/                        # generated by main.py (git-ignored)
+└── models/                         # generated by main.py (git-ignored)
 ```
 
-### Main files
+### How the code is organised
 
-**`main.py`**
-Runs the pipeline from the terminal (see *How to Run*). `predict_new_records()` scores raw purchase rows with a fitted (or loaded) pipeline.
+* **One implementation of everything the two tasks share** (`src/`): loading, validation, cleaning, the recipe, cross-validation, tuning, saving results. Each task package (`classification/`, `regression/`) holds only what genuinely differs:
+  * which rows the task trains on;
+  * its models;
+  * its metrics and reports.
 
-**`config.yaml`**
-Stores every rule and choice: column renames, placeholder tokens, schema (types, ranges, allowed categories), validity and consistency rules, imputation, encoder, scaler, split and models. It stores rules only, never fitted values. Medians, category means and scaling statistics are learned again from the training rows of every split.
-
-**`src/preprocessing.py`, `src/evaluate.py`**
-Code shared by both tasks. `preprocessing.ipynb` imports these functions instead of redefining them, so the notebook and `main.py` always run the same code.
-
-**`classification/`, `regression/`**
-Task-specific code: which rows each task trains on, the target, and the model factory.
-
-### Data
-
-**`data/raw/`** contains the original project datasets:
-
-* `train.csv`: 6,534 purchases with both targets
-* `test.csv`: 986 purchases without targets (Kaggle)
-* `clientes.csv`: optional customer table, joined on `customer_id` (used by the regression, see *Feature selection*)
-* `sample_submission.csv`: Kaggle submission format (`ID`, `repeat_purchase_90d`)
+  All three have the same interface, so `main.py` runs both tasks with the same code (`src/tasks.py` → `TASKS`).
+* **No per-task `tuning.py` or `results.py`.** Tuning (`src/tuning.py`) and saving results (`src/results.py`) work the same way for both tasks. What differs per task is configuration: search spaces in `<task>.tuning`, the target name in the prediction file. That lives in `config.yaml`, not in duplicated code.
+* **The notebooks import the pipeline's functions instead of redefining them**, so the evidence and `main.py` always run the same code.
+* **Every rule and choice is in `config.yaml`**, with a comment pointing to the notebook section that justifies it.
 
 ---
 
 ## Data
 
-Each row in the dataset represents a **customer purchase occasion**.
-
-The available variables include information about:
-
-* Current transaction values
-* Purchase details
-* Categorical transaction information
-* Historical purchase timing
-* Historical customer value
-* Rolling purchase frequency
-* Rolling customer spend
-* Additional numerical variables
-
-The project also requires that all features used for prediction are available at the time of the purchase, avoiding information from the future or from other test observations.
+See `data/README.md` for the files and the column dictionary. Each row is a **customer purchase occasion**. Every predictor is available at the time of the purchase, so no information comes from the future or from other test observations.
 
 ---
 
@@ -146,20 +159,21 @@ The project also requires that all features used for prediction are available at
 | Stage | What changed | Where |
 |---|---|---|
 | Project setup | Repository structure, raw data, requirements | — |
-| Outlier exploration | Univariate (IQR) and multivariate (DBSCAN, K-Means, SOM) outlier analysis | `2.Outlier_detection.ipynb` |
-| Data diagnosis | Column standardisation, invalid values, placeholder, almost-empty rows, category text, target missingness, date checks, duplicates | `preprocessing.ipynb` sections 1–4 |
-| Preprocessing → pipeline | Diagnosis turned into config-driven rules; identity recovery; structural missingness; missingness-mechanism tests; temporal locked test set; leak-safe `ColumnTransformer` | `src/preprocessing.py`, `config.yaml`, notebook sections 5–8 |
+| Outlier exploration | Univariate (IQR) and multivariate (DBSCAN, K-Means, SOM) exploration (first version, since replaced) | — |
+| Data diagnosis | Column standardisation, invalid values, placeholder, almost-empty rows, category text, target missingness, date checks, duplicates | `notebooks/01_preprocessing.ipynb` sections 1–4 |
+| Preprocessing → pipeline | Diagnosis turned into config-driven rules; identity recovery; structural missingness; missingness-mechanism tests; temporal locked test set; leak-safe `ColumnTransformer` | `src/`, `config.yaml`, notebook sections 5–8 |
 | Encoder × scaler + models | Temporal cross-validation, 16-recipe comparison per task, paired comparisons, Pipeline with dummy / linear / tree / random forest | `src/evaluate.py`, `*/model.py`, notebook sections 9–10 |
-| Regression target + notebook clean-up | Missing-spend mechanism tested (not MCAR), `log1p` target tested and rejected; notebook sections 1–4 call the `src/` functions | `regression/model.py`, `preprocessing.ipynb` |
-| Data quality + additions + imputers | Accounting identity explained; consistency rules fix inflated values; purchase-time features, customer table and rare-category grouping tested by ablation; 5 numeric and 2 categorical imputers compared in CV | `src/preprocessing.py`, `src/evaluate.py`, notebook sections 5.2, 11, 12 |
-| Data types + outliers | Compact dtypes (`standardize_dtypes`); `prior_max_purchase_value ≤ prior_total_spend` rule; outlier analysis with temporal validation (no statistical deletion or capping) | `config.yaml` → `dtypes`, `outlier_detection.ipynb` |
-| Validation + pipeline checks | Placeholder-token report and NaN-on-load; schema validation (types, ranges, allowed categories); `customer_id` validation; feature-list checks; missing indicators inside the pipeline (`MissingIndicator`); save → load → predict new records; 8 automated tests | `src/preprocessing.py`, `main.py`, `tests/`, notebook sections 2.2, 2.10, 4.4, 8 |
+| Regression target + notebook clean-up | Missing-spend mechanism tested (not MCAR), `log1p` target tested and rejected; notebook sections 1–4 call the `src/` functions | `regression/model.py`, notebook 01 |
+| Data quality + additions + imputers | Accounting identity explained; consistency rules fix inflated values; purchase-time features, customer table and rare-category grouping tested by ablation; 5 numeric and 2 categorical imputers compared in CV | `src/cleaning.py`, `src/evaluate.py`, notebook sections 5.2, 11, 12 |
+| Data types + outliers | Compact dtypes (`standardize_dtypes`); `prior_max_purchase_value ≤ prior_total_spend` rule; outlier analysis with temporal validation (no statistical deletion or capping) | `config.yaml` → `dtypes`, `notebooks/02_outlier_detection.ipynb` |
+| Validation + pipeline checks | Placeholder-token report and NaN-on-load; schema validation; `customer_id` validation; feature-list checks; missing indicators inside the pipeline; save → load → predict new records | `src/data.py`, `src/pipeline.py`, `tests/`, notebook sections 2.2, 2.10, 4.4, 8 |
+| Repository reorganisation | Baseline-pipeline structure. Shared code split into `src/data`, `cleaning`, `preprocessing`, `pipeline`, `evaluate`, `tuning`, `results`; task packages reduced to what differs (`preprocessing`, `model`, `evaluate`). `main.py` runs the full workflow (dummy floor, temporal CV, optional Optuna + nested CV, scoreboard, run reports, optional locked-test evaluation, saved models, Kaggle predictions). Notebooks moved to `notebooks/`; redundant files removed | whole repository |
 
 ---
 
 ## Preprocessing Decisions
 
-Every decision below is backed by evidence in `preprocessing.ipynb` (section numbers in brackets) or `outlier_detection.ipynb`, and stored as a rule in `config.yaml`. A column-by-column summary is at the end (§12).
+Every decision below is backed by evidence in `notebooks/01_preprocessing.ipynb` (section numbers in brackets) or `notebooks/02_outlier_detection.ipynb`, and stored as a rule in `config.yaml`. A column-by-column summary is at the end (§12).
 
 ### 1. Where each step runs
 
@@ -314,7 +328,7 @@ Every feature used is known at the moment of the purchase. The customer join add
 * **classification:** 26 numeric + 6 categorical + 2 flags + 1 missing indicator = 35 model columns;
 * **regression:** 29 numeric + 10 categorical + 2 flags + 1 missing indicator.
 
-### 6. Outlier detection (`outlier_detection.ipynb`)
+### 6. Outlier detection (`notebooks/02_outlier_detection.ipynb`)
 
 The outlier analysis separates **data errors** from **valid extremes**. Its principles:
 * The locked period is not used to choose a method.
@@ -325,7 +339,7 @@ The outlier analysis separates **data errors** from **valid extremes**. Its prin
 |---|---|
 | Logical consistency rules | **Used.** They find impossible values from feature definitions, including `prior_max_purchase_value > prior_total_spend` (45 train / 6 test values → `NaN` → imputed in the pipeline). |
 | IQR | Diagnostic only. It fails on zero-heavy columns, and removing rows flagged in 3+ columns seriously harms the regression. |
-| `log1p` of skewed columns | Plausible for monetary values, but no reliable improvement for either task in temporal validation. |
+| `log1p` of skewed columns | Plausible for monetary values. Classification: +0.007 accuracy, not decisive. Regression: 0.4 RMSE better (2 SE), decisive on paper but negligible (0.02% of 1,947), so not worth the extra step. |
 | Winsorisation (1%–99%) | Small changes, no reliable improvement, and it discards real magnitude information. Not used. |
 | Robust scaling | Not reliably better than the task-specific scalers already chosen (§9). |
 | Isolation Forest | The most reasonable optional multivariate diagnostic, but the rows it flags are often valuable high-repeat or high-spend customers, and removing them is not reliably better. |
@@ -353,7 +367,7 @@ A random split would let the model learn from a customer's later purchases and t
   | Classification | 5,024 | 1,286 |
   | Regression | 2,659 | 685 |
 
-* **Cross-validation** (`validation`): 5 expanding-window temporal folds inside the development set, with the same 90-day gap.
+* **Cross-validation** (`cv`): 5 expanding-window temporal folds inside the development set, with the same 90-day gap.
 
 Every comparison uses these folds, and two options are compared **fold by fold**. A difference is *decisive* only if it is more than 2 standard errors from zero. **Rule:** change the pipeline only for a decisive gain with a sensible reason, or for a clear reason that most folds confirm. Otherwise keep the current or simpler option.
 
@@ -371,13 +385,13 @@ Every comparison uses these folds, and two options are compared **fold by fold**
 * **Feature lists are defined in config and checked.** `check_feature_lists()` raises an error if:
   * a feature is listed twice, or in two groups (numeric / categorical / flags);
   * an indicator source isn't a feature;
-  * a listed feature doesn't exist in the data (`main.py` checks this before fitting).
+  * a listed feature doesn't exist in the data (`prepare_task_data()` checks this before anything is fitted).
 
   `build_preprocessor()` runs the same checks without the data.
 * **Every data-dependent operation is fitted inside the pipeline.** The imputers, missing indicator, rare grouper, target encoder and scaler are fitted on the training rows of each fold. Nothing before the pipeline learns from data; sections 2–5 are rules. A test checks that the medians equal those of the training rows and not of other rows, and that the encoder only knows training categories.
 * **Unseen categories don't crash anything.** Target encoding gives them the overall target mean. The output has no missing values for the development set, the locked test set and test.csv.
-* **Save → load → predict new records.** `main.py` saves each fitted pipeline to `models/<task>_pipeline.joblib` (16 KB for classification, ~11 MB for the random-forest regression). It then loads the file back and checks that the loaded copy predicts all 986 test.csv rows identically. `predict_new_records()` also scores a single raw record through the same stateless steps and the loaded pipeline.
-* **Automated checks** (`tests/test_pipeline.py`, 8 tests, all passing):
+* **Save → load → predict new records** (`src/pipeline.py`). `main.py` saves each fitted pipeline to `models/<task>_pipeline.joblib` (16 KB for classification, ~11 MB for the random-forest regression). It then loads the file back and checks that the loaded copy predicts all 986 test.csv rows identically. `predict_new_records()` also scores a single raw record through the same stateless steps and the loaded pipeline.
+* **Automated checks** (`tests/test_pipeline.py`, 10 tests, all passing):
   1. feature lists exist and don't overlap;
   2. errors are caught for overlaps, missing names and orphan indicators;
   3. indicators are created inside the pipeline, before imputation;
@@ -385,7 +399,9 @@ Every comparison uses these folds, and two options are compared **fold by fold**
   5. `prepare_table` keeps every row and gives the same result for a row alone or inside a table;
   6. schema validation flags and repairs bad labels and non-numeric values, and rejects a missing column;
   7. placeholder tokens become `NaN` and are reported;
-  8. both pipelines can be fitted, saved, loaded and used to predict new raw records.
+  8. both pipelines can be fitted, saved, loaded and used to predict new raw records;
+  9. Optuna tuning and nested cross-validation run on temporal folds;
+  10. the classification predictions match `sample_submission.csv` (columns, ids, order, 0/1 labels).
 
 ### 9. Encoder × scaler [9]
 
@@ -461,7 +477,8 @@ The main metric is accuracy for classification and RMSE for regression (`<task>.
 
 * Compare the preprocessed models with the week-2 baseline.
 * Leakage demo: show the optimistic gap of fitting the scaler/encoder on all rows instead of per fold.
-* Re-run `outlier_detection.ipynb` so its tables are saved with the notebook (its decisions are documented above; its code cells currently have no saved outputs).
+* Run the hyperparameter tuning for the final models (`<task>.tuning.enabled: true`). It is implemented and tested, but off by default because nested temporal CV with 30 trials takes a while.
+* Once the final models are chosen: score the locked test set once (`test_set.evaluate: true`), then refit on every labelled row for the Kaggle submission (`refit_on_all_rows: true`).
 
 ---
 

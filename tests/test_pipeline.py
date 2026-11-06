@@ -5,8 +5,9 @@ Checks of the preprocessing pipeline. Run from the project root:
 
 They cover: feature lists (exist, no overlap), missingness indicators inside the pipeline,
 every data-dependent step fitted inside the pipeline on training rows only, the
-stateless/row-preserving cleaning, schema validation, placeholder tokens, and saving,
-loading and predicting new records with the complete pipeline.
+stateless/row-preserving cleaning, schema validation, placeholder tokens, saving, loading and
+predicting new records with the complete pipeline, Optuna tuning with nested temporal CV,
+and the Kaggle submission format.
 """
 import os
 import sys
@@ -24,26 +25,36 @@ import pandas as pd  # noqa: E402
 from sklearn.exceptions import NotFittedError  # noqa: E402
 from sklearn.impute import MissingIndicator, SimpleImputer  # noqa: E402
 
-import main  # noqa: E402
-from src.evaluate import make_pipeline  # noqa: E402
-from src.preprocessing import (  # noqa: E402
-    build_preprocessor, check_feature_lists, load_data, prepare_table, report_placeholders, validate_schema,
-)
+import yaml  # noqa: E402
+
+from src.cleaning import prepare_table  # noqa: E402
+from src.data import load_data, report_placeholders, standardize_columns, validate_schema  # noqa: E402
+from src.evaluate import select_scoring, temporal_folds  # noqa: E402
+from src.pipeline import build_pipeline, predict_new_records, prepare_task_data  # noqa: E402
+from src.preprocessing import build_preprocessor, check_feature_lists  # noqa: E402
+from src.results import save_predictions  # noqa: E402
+from src.tasks import TASKS  # noqa: E402
+from src.tuning import nested_cross_validate, tune_pipeline  # noqa: E402
+
+
+@lru_cache(maxsize=None)
+def config():
+    with open("config.yaml", encoding="utf-8") as file:
+        return yaml.safe_load(file)
 
 
 @lru_cache(maxsize=None)
 def task_data(task):
-    return main.run_preprocessing(main.load_config(), task, verbose=False)
+    return prepare_task_data(config(), task)
 
 
-def config():
-    return main.load_config()
+def task_pipeline(task, model_config=None):
+    return build_pipeline(task_data(task)["preprocessing_config"],
+                          TASKS[task].model.build_model(model_config or config()[task]["model"]))
 
 
 def classification_pipeline():
-    cfg = config()
-    return make_pipeline(task_data("classification")["preprocessing_config"],
-                         main.MODELS["classification"].build_model(cfg["classification"]["model"]))
+    return task_pipeline("classification")
 
 
 def expect_error(function, *args):
@@ -134,7 +145,6 @@ def test_prepare_table_keeps_every_row_and_is_stateless():
 def test_schema_validation_flags_and_repairs():
     cfg = config()
     raw = load_data(cfg["data"]["test_path"]).head(5)
-    from src.preprocessing import standardize_columns
     table = standardize_columns(raw, cfg["diagnostics"]["column_renames"])
     table["payment_type"] = table["payment_type"].astype(object)
     table.loc[table.index[0], "payment_type"] = "Cash!!"            # not an allowed label
@@ -164,7 +174,7 @@ def test_complete_pipeline_can_be_fitted_saved_loaded_and_predict_new_records():
     cfg = config()
     for task in ["classification", "regression"]:
         data = task_data(task)
-        pipeline = make_pipeline(data["preprocessing_config"], main.MODELS[task].build_model(cfg[task]["model"]))
+        pipeline = task_pipeline(task)
         pipeline.fit(data["X_dev"], data["y_dev"])
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / f"{task}.joblib"
@@ -172,10 +182,42 @@ def test_complete_pipeline_can_be_fitted_saved_loaded_and_predict_new_records():
             loaded = joblib.load(path)
         assert np.allclose(loaded.predict(data["X_kaggle"]), pipeline.predict(data["X_kaggle"]))
         new_records = data["kaggle_raw"].sample(3, random_state=0)
-        predictions = main.predict_new_records(new_records, cfg, task, loaded, data["clientes"])
+        predictions = predict_new_records(new_records, cfg, task, loaded, data["clientes"])
         positions = data["kaggle_raw"].index.get_indexer(new_records.index)
         assert np.allclose(predictions, pipeline.predict(data["X_kaggle"].iloc[positions]))
         assert len(predictions) == 3 and np.isfinite(predictions).all()
+
+
+# ---------------------------------------------------------------- tuning + outputs
+def test_tuning_and_nested_cv_run_on_temporal_folds():
+    cfg = config()
+    data = task_data("classification")
+    scoring = select_scoring(TASKS["classification"].evaluate.SCORING, cfg["classification"]["metrics"])
+    dates = data["extras_dev"][cfg["data"]["date_column"]]
+    folds = temporal_folds(dates, 3, cfg["cv"]["gap_days"])
+    space = cfg["classification"]["tuning"]["search_spaces"]["logistic_regression"]
+    best, study = tune_pipeline(classification_pipeline(), data["X_dev"], data["y_dev"], folds,
+                                scoring["accuracy"], space, n_trials=2, random_state=0)
+    assert len(study.trials) == 2 and set(study.best_params) == set(space)
+    scores, oof = nested_cross_validate(classification_pipeline(), data["X_dev"], data["y_dev"], dates, folds, 2,
+                                        cfg["cv"]["gap_days"], scoring, "accuracy", space, 2, 0,
+                                        TASKS["classification"].evaluate.predict_for_report)
+    assert len(scores) == len(folds) and {"inner_best", "validation_accuracy"} <= set(scores.columns)
+    assert oof.notna().sum() == sum(len(v) for _, v in folds)
+
+
+def test_classification_predictions_match_the_kaggle_sample_submission():
+    cfg = config()
+    data = task_data("classification")
+    pipeline = classification_pipeline().fit(data["X_dev"], data["y_dev"])
+    with tempfile.TemporaryDirectory() as folder:
+        written = save_predictions(Path(folder) / "classification.csv", data["extras_kaggle"]["id"],
+                                   pipeline.predict(data["X_kaggle"]), cfg["data"]["submission_id_column"],
+                                   cfg["classification"]["target"], cfg["data"]["sample_submission_path"])
+    sample = pd.read_csv(cfg["data"]["sample_submission_path"])
+    assert list(written.columns) == list(sample.columns) and written["ID"].tolist() == sample["ID"].tolist()
+    assert written["repeat_purchase_90d"].dtype == sample["repeat_purchase_90d"].dtype
+    assert set(written["repeat_purchase_90d"].unique()) <= {0, 1}
 
 
 if __name__ == "__main__":

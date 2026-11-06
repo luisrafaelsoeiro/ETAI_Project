@@ -1,9 +1,16 @@
 """
-Evaluation shared by both tasks: temporal cross-validation folds on the development set,
-cross-validated scoring of a full Pipeline (preprocessing + model), the encoder x scaler
-comparison, and the paired comparison of two recipes.
+Evaluation shared by both tasks, on the development set only (the locked test set never
+enters any function here):
 
-The locked test set never enters any function here.
+  - temporal cross-validation folds (expanding window, with a gap);
+  - cross-validated scoring of a full Pipeline on several metrics, with out-of-fold
+    predictions for the reports;
+  - the encoder x scaler comparison and other preprocessing comparisons on the same folds;
+  - the paired comparison of two options, fold by fold.
+
+Metrics are passed in as `scoring`: {name: sklearn scoring string}, chosen per task in
+config.yaml (`<task>.metrics`) from the task's `evaluate.SCORING`. Scores are reported
+"natural side up": errors such as RMSE come out positive.
 """
 import itertools
 import warnings
@@ -12,15 +19,22 @@ import numpy as np
 import pandas as pd
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.model_selection import cross_validate
-from sklearn.pipeline import Pipeline
 
-from src.preprocessing import build_preprocessor
+from src.pipeline import build_pipeline
 
-# sklearn scorer names per task; scores are "greater is better" (errors come negated)
-SCORERS = {
-    "classification": {"accuracy": "accuracy", "f1": "f1", "roc_auc": "roc_auc"},
-    "regression": {"rmse": "neg_root_mean_squared_error", "mae": "neg_mean_absolute_error", "r2": "r2"},
-}
+
+def select_scoring(available: dict, metrics: list) -> dict:
+    """{name: sklearn scoring string} for the metrics listed in config.yaml, checked
+    against the ones a task supports (`<task>.evaluate.SCORING`)."""
+    unknown = [m for m in metrics if m not in available]
+    if unknown:
+        raise ValueError(f"Unknown metrics {unknown}. Options: {list(available)}")
+    return {m: available[m] for m in metrics}
+
+
+def greater_is_better(scoring: str) -> bool:
+    """sklearn error scorers are negated ("neg_..."): lower is better for the metric itself."""
+    return not scoring.startswith("neg_")
 
 
 def temporal_folds(dates: pd.Series, n_splits: int, gap_days: int = 0):
@@ -31,7 +45,8 @@ def temporal_folds(dates: pd.Series, n_splits: int, gap_days: int = 0):
 
     `gap_days` drops training rows from the last days before each validation block: their
     90-day labels are measured inside the validation period, so keeping them would let the
-    label of a training row "see" the period being scored.
+    label of a training row "see" the period being scored. A fold left without training rows
+    is skipped.
 
     Returns a list of (train_positions, validation_positions), usable as `cv=` in sklearn.
     """
@@ -44,27 +59,45 @@ def temporal_folds(dates: pd.Series, n_splits: int, gap_days: int = 0):
         start = values[validation].min()
         train = np.concatenate(blocks[:k])
         train = train[values[train] < start - np.timedelta64(gap_days, "D")]
-        folds.append((np.sort(train), np.sort(validation)))
+        if len(train):
+            folds.append((np.sort(train), np.sort(validation)))
     return folds
 
 
-def make_pipeline(preprocessing_config: dict, model) -> Pipeline:
-    """Preprocessing + model as one estimator: `fit` learns everything from training rows only."""
-    return Pipeline([("prep", build_preprocessor(preprocessing_config)), ("model", model)])
+def cross_validate_with_oof(pipeline, X, y, folds, scoring: dict, predict=None):
+    """
+    Fits a fresh copy of `pipeline` (preprocessing included) on each fold's training rows and
+    scores it on that fold's validation rows, on every metric in `scoring`.
 
-
-def cross_validate_pipeline(pipeline, X, y, folds, task: str) -> pd.DataFrame:
-    """One row per fold with train and validation scores for every metric of the task.
-    Error metrics are reported positive (RMSE, MAE)."""
+    Returns (fold_scores, oof):
+      - fold_scores: one row per fold, `train_<metric>` and `validation_<metric>` columns
+        (errors reported positive);
+      - oof: out-of-fold predictions (`predict(model, X)`, e.g. a probability) for every
+        validated row, from the fold model that did not train on it. Temporal folds never
+        validate the first block, so those rows stay NaN. None when `predict` is None.
+    """
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", ConvergenceWarning)
-        result = cross_validate(pipeline, X, y, cv=folds, scoring=SCORERS[task], return_train_score=True)
+        result = cross_validate(pipeline, X, y, cv=folds, scoring=scoring, return_train_score=True,
+                                return_estimator=predict is not None)
     rows = {}
-    for metric, scorer in SCORERS[task].items():
-        sign = -1 if scorer.startswith("neg_") else 1
+    for metric, scorer in scoring.items():
+        sign = 1 if greater_is_better(scorer) else -1
         rows[f"train_{metric}"] = sign * result[f"train_{metric}"]
         rows[f"validation_{metric}"] = sign * result[f"test_{metric}"]
-    return pd.DataFrame(rows).rename_axis("fold")
+    fold_scores = pd.DataFrame(rows).rename_axis("fold")
+
+    if predict is None:
+        return fold_scores, None
+    oof = pd.Series(np.nan, index=X.index, dtype=float)
+    for model, (_, validation) in zip(result["estimator"], folds):
+        oof.iloc[validation] = predict(model, X.iloc[validation])
+    return fold_scores, oof
+
+
+def cross_validate_pipeline(pipeline, X, y, folds, scoring: dict) -> pd.DataFrame:
+    """`cross_validate_with_oof` without the out-of-fold predictions: one row per fold."""
+    return cross_validate_with_oof(pipeline, X, y, folds, scoring)[0]
 
 
 def summarize(fold_scores: pd.DataFrame) -> pd.Series:
@@ -72,39 +105,54 @@ def summarize(fold_scores: pd.DataFrame) -> pd.Series:
     return pd.concat([fold_scores.mean().add_suffix("_mean"), fold_scores.std(ddof=1).add_suffix("_std")])
 
 
-def compare_encoders_scalers(preprocessing_config, model_factory, X, y, folds, task, metric,
+def cv_report(fold_scores: pd.DataFrame, metrics: list, selection_metric: str, title: str,
+              higher_is_better: bool = True) -> str:
+    """Per-fold validation table, mean and std of every metric, and the overfitting gap of the
+    selection metric (how much better the training score is than the validation score), as text."""
+    validation = fold_scores[[f"validation_{m}" for m in metrics]].rename(columns=lambda c: c.replace("validation_", ""))
+    gap = fold_scores[f"train_{selection_metric}"] - fold_scores[f"validation_{selection_metric}"]
+    gap = gap if higher_is_better else -gap
+    return "\n".join([
+        f"{title} ({len(fold_scores)} temporal folds, selection metric: {selection_metric})",
+        "",
+        validation.to_string(float_format=lambda v: f"{v:.4f}"),
+        "",
+        validation.agg(["mean", "std"]).T.to_string(float_format=lambda v: f"{v:.4f}"),
+        "",
+        f"{selection_metric}: train mean = {fold_scores[f'train_{selection_metric}'].mean():.4f}, "
+        f"overfitting gap (train better than validation by) = {gap.mean():+.4f}",
+    ])
+
+
+def compare_encoders_scalers(preprocessing_config, model_factory, X, y, folds, scoring: dict, metric: str,
                              encoders, scalers) -> tuple:
     """
     Scores every encoder x scaler pair on the SAME folds. Returns
     (ranking table, {(encoder, scaler): per-fold validation scores}) -- the per-fold scores
     make a paired comparison possible.
     """
-    higher_is_better = not SCORERS[task][metric].startswith("neg_")
-    per_fold, rows = {}, []
-    for encoder, scaler in itertools.product(encoders, scalers):
-        config = {**preprocessing_config, "encoder": encoder, "scaler": scaler}
-        scores = cross_validate_pipeline(make_pipeline(config, model_factory()), X, y, folds, task)
-        per_fold[(encoder, scaler)] = scores[f"validation_{metric}"].to_numpy()
-        rows.append({"encoder": encoder, "scaler": scaler,
-                     f"mean_{metric}": scores[f"validation_{metric}"].mean(),
-                     f"std_{metric}": scores[f"validation_{metric}"].std(ddof=1)})
-    ranking = pd.DataFrame(rows).sort_values(f"mean_{metric}", ascending=not higher_is_better).reset_index(drop=True)
-    return ranking, per_fold
+    variants = {(encoder, scaler): {**preprocessing_config, "encoder": encoder, "scaler": scaler}
+                for encoder, scaler in itertools.product(encoders, scalers)}
+    table, per_fold = compare_preprocessing_variants(variants, model_factory, X, y, folds, scoring, metric)
+    pairs = table.pop("variant")
+    table.insert(0, "encoder", [encoder for encoder, _ in pairs])
+    table.insert(1, "scaler", [scaler for _, scaler in pairs])
+    return table, per_fold
 
 
-def compare_preprocessing_variants(variants: dict, model_factory, X, y, folds, task, metric) -> tuple:
+def compare_preprocessing_variants(variants: dict, model_factory, X, y, folds, scoring: dict, metric: str) -> tuple:
     """
     Scores several preprocessing configurations (name -> preprocessing config) with the same
     model on the SAME folds. Returns (table, {name: per-fold validation scores}) for paired
     comparisons -- used for ablations (with vs without a feature group) and imputers.
     """
-    higher_is_better = not SCORERS[task][metric].startswith("neg_")
     per_fold, rows = {}, []
     for name, config in variants.items():
-        scores = cross_validate_pipeline(make_pipeline(config, model_factory()), X, y, folds, task)
+        scores = cross_validate_pipeline(build_pipeline(config, model_factory()), X, y, folds, scoring)
         per_fold[name] = scores[f"validation_{metric}"].to_numpy()
         rows.append({"variant": name, f"mean_{metric}": per_fold[name].mean(), f"std_{metric}": per_fold[name].std(ddof=1)})
-    table = pd.DataFrame(rows).sort_values(f"mean_{metric}", ascending=not higher_is_better).reset_index(drop=True)
+    ascending = not greater_is_better(scoring[metric])
+    table = pd.DataFrame(rows).sort_values(f"mean_{metric}", ascending=ascending).reset_index(drop=True)
     return table, per_fold
 
 

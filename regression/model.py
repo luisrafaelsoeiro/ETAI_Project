@@ -5,9 +5,10 @@ Chosen in config.yaml -> regression.model, built here.
 import numpy as np
 from sklearn.compose import TransformedTargetRegressor
 from sklearn.dummy import DummyRegressor
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import GradientBoostingRegressor, HistGradientBoostingRegressor, RandomForestRegressor
 from sklearn.linear_model import Ridge
 from sklearn.tree import DecisionTreeRegressor
+from xgboost import XGBRegressor
 
 _MODELS = {
     # always predicts the training mean -- the floor every real model must beat
@@ -15,6 +16,9 @@ _MODELS = {
     "ridge": Ridge,
     "decision_tree": DecisionTreeRegressor,
     "random_forest": RandomForestRegressor,
+    "gradient_boosting": GradientBoostingRegressor,
+    "hist_gradient_boosting": HistGradientBoostingRegressor,
+    "xgboost": XGBRegressor,
 }
 
 # the model is fitted on the transformed target; predictions are transformed back, so every
@@ -26,6 +30,8 @@ _TARGET_TRANSFORMS = {
 
 
 def build_model(model_config: dict):
+    """Builds the model named by `model_config["type"]` with `model_config["params"]`, wrapped
+    in a TransformedTargetRegressor when `target_transform` is not "none"."""
     model_type = model_config["type"]
     params = model_config.get("params") or {}
     if model_type not in _MODELS:
