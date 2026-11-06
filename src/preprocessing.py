@@ -21,7 +21,7 @@ import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.compose import ColumnTransformer
 from sklearn.experimental import enable_iterative_imputer  # noqa: F401 -- makes IterativeImputer importable
-from sklearn.impute import IterativeImputer, KNNImputer, SimpleImputer
+from sklearn.impute import IterativeImputer, KNNImputer, MissingIndicator, SimpleImputer
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import (
@@ -30,9 +30,134 @@ from sklearn.preprocessing import (
 from category_encoders import CountEncoder
 
 
-def load_data(path) -> pd.DataFrame:
-    """Load a raw CSV file."""
-    return pd.read_csv(path)
+def load_data(path, placeholder_tokens=None) -> pd.DataFrame:
+    """Load a raw CSV file. Every placeholder token (blank cell, "?", "N/A", ...) becomes
+    NaN on load, so a numeric column can't silently turn into text because of one token."""
+    tokens = [t for t in (placeholder_tokens or []) if t != ""]   # blank cells are NaN already
+    return pd.read_csv(path, na_values=tokens or None)
+
+
+def report_placeholders(path, diagnostics_config: dict) -> pd.DataFrame:
+    """
+    Missing-value report straight from the raw file (read as text, so nothing is converted
+    yet): how often each placeholder token appears in each column, plus the numeric
+    placeholder values (e.g. 1,000,000,000). Report only -- `load_data` turns the tokens
+    into NaN and `flag_invalid_values` handles the numeric placeholders.
+    """
+    raw = pd.read_csv(path, dtype=str, keep_default_na=False)
+    tokens = diagnostics_config.get("placeholder_tokens", [])
+    rows = []
+    for column in raw.columns:
+        stripped = raw[column].str.strip()
+        for token in tokens:
+            count = int(stripped.eq(token).sum())
+            if count:
+                rows.append({"column": column, "placeholder": repr(token), "count": count,
+                             "treatment": "NaN on load (load_data)"})
+        numeric = pd.to_numeric(stripped, errors="coerce")
+        for value in diagnostics_config.get("placeholder_values", []):
+            count = int(numeric.eq(value).sum())
+            if count:
+                rows.append({"column": column, "placeholder": f"{value:,}", "count": count,
+                             "treatment": "NaN in clean_dataset (flag_invalid_values)"})
+    return pd.DataFrame(rows, columns=["column", "placeholder", "count", "treatment"])
+
+
+def validate_schema(df: pd.DataFrame, schema_config: dict, non_negative_columns=()):
+    """
+    Validates a table with standardised column names against config.yaml -> `schema`, and
+    returns (df, report). Stateless and row-preserving.
+      - required columns: an error if one is missing; unexpected extra columns are reported;
+      - expected data types: numeric columns that are not numeric are coerced (values that
+        can't be read as numbers -> NaN, counted); dates that don't parse are counted;
+      - valid ranges: values outside [min, max] are counted (`clean_dataset` turns them
+        into NaN). Every non-negative column gets min 0 automatically;
+      - allowed categories: each categorical column has a pattern for its labels; a label
+        that doesn't match is not a category at all -> NaN, counted. Labels that match but
+        were never seen in training are fine: the encoders handle them.
+    """
+    out = df.copy()
+    rows = []
+
+    def add(step, column, values, rule=""):
+        rows.append({"step": step, "column": column, "values": int(values), "rule": rule})
+
+    missing = [c for c in schema_config.get("required_columns", []) if c not in out.columns]
+    if missing:
+        raise ValueError(f"Missing required columns: {missing}")
+    known = set(schema_config.get("required_columns", [])) | set(schema_config.get("optional_columns", []))
+    for column in [c for c in out.columns if known and c not in known]:
+        add("schema: unexpected column", column, len(out))
+
+    types = schema_config.get("expected_types", {})
+    for column in types.get("numeric", []):
+        if column in out.columns and not pd.api.types.is_numeric_dtype(out[column]):
+            coerced = pd.to_numeric(out[column], errors="coerce")
+            add("schema: non-numeric -> NaN", column, coerced.isna().sum() - out[column].isna().sum(), "numeric")
+            out[column] = coerced
+    for column in types.get("date", []):
+        if column in out.columns:
+            parsed = pd.to_datetime(out[column], errors="coerce")
+            add("schema: unparseable date", column, parsed.isna().sum() - out[column].isna().sum(), "date")
+    for column in types.get("integer", []):
+        if column in out.columns:
+            values = out[column].dropna()
+            add("schema: non-integer value", column, (values != np.round(values)).sum(), "integer")
+
+    ranges = {c: {"min": 0} for c in non_negative_columns}
+    for column, bounds in schema_config.get("ranges", {}).items():
+        ranges[column] = {**ranges.get(column, {}), **bounds}
+    for column, bounds in ranges.items():
+        if column not in out.columns:
+            continue
+        values = out[column]
+        if pd.api.types.is_datetime64_any_dtype(values) or column in types.get("date", []):
+            values = pd.to_datetime(values, errors="coerce")
+            low, high = (pd.Timestamp(bounds[k]) if k in bounds else None for k in ("min", "max"))
+        else:
+            low, high = bounds.get("min"), bounds.get("max")
+        outside = pd.Series(False, index=values.index)
+        if low is not None:
+            outside |= values < low
+        if high is not None:
+            outside |= values > high
+        add("schema: outside valid range", column, outside.fillna(False).sum(),
+            f"[{bounds.get('min', '-inf')}, {bounds.get('max', 'inf')}]")
+
+    for column, pattern in schema_config.get("allowed_categories", {}).items():
+        if column in out.columns:
+            labels = out[column].astype("string").str.strip()
+            invalid = labels.notna() & ~labels.str.fullmatch(pattern).fillna(False)
+            add("schema: label not allowed -> NaN", column, invalid.sum(), pattern)
+            out.loc[invalid, column] = np.nan
+
+    return out, pd.DataFrame(rows, columns=["step", "column", "values", "rule"])
+
+
+def validate_customer_ids(df: pd.DataFrame, clientes: pd.DataFrame, data_config: dict) -> pd.DataFrame:
+    """
+    Report on the customer id of every purchase: present, a positive integer, known in
+    clientes.csv, and -- per customer, in date order -- a history that never goes
+    backwards (prior purchase count and tenure can't decrease; no two purchases of the
+    same customer on the same day). Report only: nothing is removed.
+    """
+    key, date = data_config["group_column"], data_config["date_column"]
+    ids = df[key]
+    numeric_ids = pd.to_numeric(ids, errors="coerce")
+    known = set(standardize_columns(clientes, {})[key])
+    rows = [
+        ("missing customer_id", ids.isna().sum()),
+        ("customer_id not a positive integer", (ids.notna() & ~((numeric_ids > 0) & (numeric_ids == np.round(numeric_ids)))).sum()),
+        ("customer_id not in clientes.csv", (ids.notna() & ~ids.isin(known)).sum()),
+    ]
+    ordered = df.assign(_date=pd.to_datetime(df[date], errors="coerce")).sort_values([key, "_date"])
+    by_customer = ordered.groupby(key)
+    for column in ["prior_purchase_count", "customer_tenure_days"]:
+        if column in ordered.columns:
+            rows.append((f"{column} decreases over a customer's purchases", (by_customer[column].diff() < 0).sum()))
+    dated = ordered[ordered["_date"].notna()]                 # rows without a date can't collide
+    rows.append(("same customer, same purchase date", dated.duplicated([key, "_date"]).sum()))
+    return pd.DataFrame([{"check": check, "rows": int(count)} for check, count in rows])
 
 
 def to_snake_case(name) -> str:
@@ -236,9 +361,14 @@ def standardize_dtypes(df: pd.DataFrame, dtype_config: dict) -> pd.DataFrame:
 
 
 def prepare_table(df: pd.DataFrame, config: dict, clientes: pd.DataFrame = None):
-    """clean_dataset + the optional customer-table join: every stateless step, in the order
-    main.py and the notebook use for train.csv and test.csv. Returns (df, cleaning report)."""
-    out, report = clean_dataset(df, config["diagnostics"])
+    """Every stateless step, in the order main.py and the notebook use for train.csv and
+    test.csv: standardise names -> validate_schema -> clean_dataset -> customer-table join ->
+    compact dtypes. Returns (df, report): every value the validation and cleaning changed."""
+    diagnostics = config["diagnostics"]
+    out = standardize_columns(df, diagnostics.get("column_renames", {}))
+    out, schema_report = validate_schema(out, config.get("schema", {}), diagnostics.get("non_negative_columns", []))
+    out, report = clean_dataset(out, diagnostics)
+    report = pd.concat([schema_report[schema_report["values"] > 0], report], ignore_index=True)
     customers_config = config.get("customers", {})
     if customers_config.get("use", False):
         if clientes is None:
@@ -289,25 +419,16 @@ def drop_training_rows(df: pd.DataFrame, diagnostics_config: dict, id_column: st
     return out.copy(), report
 
 
-def add_missingness_indicators(df: pd.DataFrame, mnar_indicator_sources: list) -> pd.DataFrame:
-    """Adds `<col>_was_missing` for each column whose missingness carries information,
-    before the column is imputed -- the fill value alone can't carry that signal."""
-    out = df.copy()
-    for col in mnar_indicator_sources:
-        if col in out.columns:
-            out[f"{col}_was_missing"] = out[col].isna().astype(int)
-    return out
-
-
-def split_features_target(df: pd.DataFrame, data_config: dict, target: str, mnar_indicator_sources: list):
+def split_features_target(df: pd.DataFrame, data_config: dict, target: str):
     """
     Returns (X, y, extras).
       - y is None when the target column is absent (test.csv) -- nothing needs it.
       - extras keeps id / customer_id / purchase_date row-aligned with X: needed for the
         temporal split, grouping and the submission file, never as model inputs.
       - every target column is removed from X, so neither task can see the other's label.
+    Missingness indicators are not added here: the `indicators` step of
+    `build_preprocessor` creates them inside the pipeline.
     """
-    df = add_missingness_indicators(df, mnar_indicator_sources)
     y = df[target] if target in df.columns else None
 
     extras_cols = [c for c in data_config.get("extras_columns", []) if c in df.columns]
@@ -414,6 +535,41 @@ def _numeric_imputer(imputation: dict):
     return SimpleImputer(strategy=strategy)
 
 
+def check_feature_lists(preprocessing_config: dict, available_columns=None) -> None:
+    """
+    Raises ValueError when the feature lists of a preprocessing config are inconsistent:
+      - a feature listed twice, or in more than one group (numeric / categorical / flags);
+      - a missingness-indicator source that is not itself a numeric or categorical feature;
+      - (when `available_columns` is given) a listed feature that doesn't exist in the data.
+    """
+    groups = {
+        "numeric_features": list(preprocessing_config["numeric_features"]),
+        "categorical_features": list(preprocessing_config["categorical_features"]),
+        "flag_features": list(preprocessing_config.get("flag_features", [])),
+    }
+    problems = []
+    for name, features in groups.items():
+        repeated = sorted({f for f in features if features.count(f) > 1})
+        if repeated:
+            problems.append(f"{name} lists {repeated} more than once")
+    names = list(groups)
+    for i, first in enumerate(names):
+        for second in names[i + 1:]:
+            overlap = sorted(set(groups[first]) & set(groups[second]))
+            if overlap:
+                problems.append(f"{overlap} are in both {first} and {second}")
+    indicator_sources = preprocessing_config.get("mnar_indicator_sources", [])
+    orphan = sorted(set(indicator_sources) - set(groups["numeric_features"]) - set(groups["categorical_features"]))
+    if orphan:
+        problems.append(f"mnar_indicator_sources {orphan} are not numeric or categorical features")
+    if available_columns is not None:
+        absent = sorted(set().union(*groups.values()) - set(available_columns))
+        if absent:
+            problems.append(f"features not found in the data: {absent}")
+    if problems:
+        raise ValueError("Invalid preprocessing feature lists: " + "; ".join(problems))
+
+
 def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
     """
     Factory: the leak-safe ColumnTransformer described by config.yaml's `preprocessing`
@@ -423,7 +579,9 @@ def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
     Numeric imputation: "median" / "mean" / "constant" impute then scale; "knn" and
     "iterative" scale first, so distances / regressions are not dominated by the
     large-valued columns. Categorical: impute, group rare categories, encode.
+    Indicators: `MissingIndicator` on the raw (not yet imputed) MNAR/MAR columns.
     """
+    check_feature_lists(preprocessing_config)
     numeric_features = preprocessing_config["numeric_features"]
     categorical_features = preprocessing_config["categorical_features"]
     mnar_indicator_sources = preprocessing_config.get("mnar_indicator_sources", [])
@@ -450,10 +608,11 @@ def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
         ("encode", encoder),
     ])
 
-    passthrough = flag_features + [f"{c}_was_missing" for c in mnar_indicator_sources]
-
+    # every transformer sees the ORIGINAL columns, so the indicators see the gaps before
+    # the numeric/categorical imputers fill them
     return ColumnTransformer([
         ("numeric", numeric_pipeline, numeric_features),
         ("categorical", categorical_pipeline, categorical_features),
-        ("flags", "passthrough", passthrough),
+        ("indicators", MissingIndicator(features="all"), mnar_indicator_sources),
+        ("flags", "passthrough", flag_features),
     ])

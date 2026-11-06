@@ -20,5 +20,4 @@ def prepare_features(df: pd.DataFrame, config: dict):
     """(X, y, extras) for the classifier. y is None on test.csv."""
     return split_features_target(
         df, config["data"], config["classification"]["target"],
-        config["preprocessing"].get("mnar_indicator_sources", []),
     )

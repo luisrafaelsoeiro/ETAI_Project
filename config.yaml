@@ -16,6 +16,56 @@ data:
   # random_noise: pure noise (corr with target -0.012), see preprocessing.ipynb section 5
   drop_columns: [random_noise]
 
+# where `python main.py` saves each task's fitted pipeline (preprocessing + model)
+output:
+  models_dir: models
+
+# Validation of every purchase table (train.csv, test.csv, new records) before cleaning
+# (`validate_schema`, run by `prepare_table`; preprocessing.ipynb section 2.10)
+schema:
+  required_columns: [id, customer_id, purchase_date, total_payable, gross_total, net_total,
+                     total_tax, shipping_cost, global_discount_total, line_discount_total, cost,
+                     line_item_count, invoice_count_current_purchase,
+                     days_since_previous_purchase, customer_tenure_days, prior_purchase_count,
+                     prior_total_spend, prior_mean_purchase_value, prior_std_purchase_value,
+                     prior_min_purchase_value, prior_max_purchase_value, prior_mean_gap_days,
+                     prior_std_gap_days, purchase_count_30d, spend_30d, purchase_count_90d,
+                     spend_90d, purchase_count_180d, spend_180d, purchase_count_365d, spend_365d,
+                     payment_type, salesperson, commercial_zone, transport_method, warehouse,
+                     document_series]
+  # targets only exist in train.csv; random_noise is dropped anyway
+  optional_columns: [repeat_purchase_90d, spend_next_90d, random_noise]
+  expected_types:
+    numeric: [id, customer_id, total_payable, gross_total, net_total, total_tax, shipping_cost,
+              global_discount_total, line_discount_total, cost, line_item_count,
+              invoice_count_current_purchase, days_since_previous_purchase,
+              customer_tenure_days, prior_purchase_count, prior_total_spend,
+              prior_mean_purchase_value, prior_std_purchase_value, prior_min_purchase_value,
+              prior_max_purchase_value, prior_mean_gap_days, prior_std_gap_days,
+              purchase_count_30d, spend_30d, purchase_count_90d, spend_90d,
+              purchase_count_180d, spend_180d, purchase_count_365d, spend_365d,
+              repeat_purchase_90d, spend_next_90d, random_noise]
+    integer: [id, customer_id, line_item_count, invoice_count_current_purchase,
+              customer_tenure_days, prior_purchase_count, purchase_count_30d,
+              purchase_count_90d, purchase_count_180d, purchase_count_365d,
+              repeat_purchase_90d]
+    date: [purchase_date]
+  # every diagnostics.non_negative_columns entry also gets min 0 automatically
+  ranges:
+    purchase_date: {min: "2010-01-01", max: "2030-12-31"}
+    line_item_count: {min: 1}
+    invoice_count_current_purchase: {min: 1}
+    repeat_purchase_90d: {min: 0, max: 1}
+    spend_next_90d: {min: 0}
+  # every label follows "<fixed text> <number>"; a label that doesn't is not a category
+  allowed_categories:
+    payment_type: 'Maybe Tomorrow Payment \d+'
+    salesperson: 'VLOOKUP Master \d+'
+    commercial_zone: 'Decorative Dashboard Zone \d+'
+    transport_method: 'Maybe Tomorrow Delivery \d+'
+    warehouse: 'Final Excel Warehouse \d+'
+    document_series: 'Ctrl Z Series \d+'
+
 # Compact storage types applied after the stateless cleaning rules. Monetary values and
 # calculated statistics remain float64. days_since_previous_purchase also stays float64
 # because an identity can recover a small number of fractional estimates.
@@ -60,8 +110,8 @@ classification:
   # target + minmax / robust (no pair is decisively better -> keep); decisively beats one-hot.
   # Section 11: none of the new features helps -> original features; section 12: median / mode
   preprocessing: {encoder: target, scaler: standard}
-  # model comparison (section 10): best validation accuracy (0.709), smallest train/validation
-  # gap; random forest is 0.002 behind (not decisive) and overfits (train 0.85)
+  # model comparison (section 10): validation accuracy 0.707, no train/validation gap; the
+  # random forest ties it (0.0002 ahead, not decisive) and overfits (train 0.85) -> keep
   model: {type: logistic_regression, params: {max_iter: 2000}}
 
 regression:
@@ -80,13 +130,14 @@ regression:
   preprocessing:
     encoder: target
     scaler: minmax
-    # section 11: date parts (41 RMSE, 5/5 folds) and customer features (42 RMSE) lower
+    # section 11: date parts (41 RMSE, 5/5 folds) and customer features (39 RMSE) lower
     # RMSE; the derived ratios add nothing
     extra_numeric_features: [purchase_month, purchase_weekday, years_as_customer]
     extra_categorical_features: [country_or_region, commercial_region, island, municipality]
-    # section 12: an explicit "Missing" category is better on 5/5 folds (island is 34% missing)
+    # section 12: an explicit "Missing" category: island is 34% missing and the gap is related
+    # to the target (only 0.5 RMSE better than most frequent -- kept, not decisive either way)
     imputation: {categorical_strategy: constant, categorical_fill_value: Missing}
-  # lowest validation RMSE (1946); ahead of ridge on 3 of 5 folds (90 RMSE, SE 65: not decisive).
+  # lowest validation RMSE (1947); ahead of ridge on 3 of 5 folds (88 RMSE, SE 66: not decisive).
   # target_transform: none | log1p -- log1p was decisively worse in euros (section 10)
   model:
     type: random_forest
@@ -157,6 +208,11 @@ diagnostics:
     - spend_180d
     - purchase_count_365d
     - spend_365d
+
+  # text placeholders -> NaN when the file is loaded (load_data). In the raw files the only
+  # one found is the blank cell (preprocessing.ipynb section 2.2)
+  placeholder_tokens: ["", "-", "--", "?", "N/A", "NA", "n/a", "na", "null", "NULL", "None",
+                       "none", "nan", "NaN", "missing", "Missing", "unknown", "Unknown"]
 
   # the exact value 1,000,000,000 only appears in these two columns -> placeholder -> NaN
   placeholder_values: [1000000000]
@@ -283,7 +339,8 @@ preprocessing:
     - warehouse
     - document_series
   flag_features: [is_first_purchase, has_gap_history]
-  # columns whose missingness carries information (preprocessing.ipynb section 6):
+  # columns whose missingness carries information (preprocessing.ipynb section 6); the
+  # `indicators` step of the pipeline (MissingIndicator) adds a 0/1 column for each:
   # after the identity fill, spend_365d is only missing for customers with > 365 days of
   # tenure, so a median alone would pull them towards short-tenure spend
   mnar_indicator_sources: [spend_365d]

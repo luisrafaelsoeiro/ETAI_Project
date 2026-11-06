@@ -21,5 +21,4 @@ def prepare_features(df: pd.DataFrame, config: dict):
     """(X, y, extras) for the regressor. y is None on test.csv."""
     return split_features_target(
         df, config["data"], config["regression"]["target"],
-        config["preprocessing"].get("mnar_indicator_sources", []),
     )

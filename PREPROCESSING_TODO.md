@@ -78,10 +78,8 @@ Facts below marked 🔎 were checked on the raw data while writing this list.
 - [x] **Accounting identities** (notebook 5.2): `gross − discounts = net` holds on 100%. The 16% "failures" of `net + tax + shipping = total_payable` are exactly the rows with a shipping cost: `total_payable = net + tax` holds on 100%. Shipping just isn't included → no error; `total_payable` dropped as an exact sum.
 - [x] **Logical consistency** (notebook 5.2, `diagnostics.consistency_rules`, `apply_consistency_rules()`): 16 rules. 13 have 0 violations. `prior_mean_purchase_value` ≠ total / count (46 train, 8–25× inflated) and `spend_365d` > prior total spend (39 train) → `NaN` → recovered by the identities. `cost > net_total` (39 sales below cost) is plausible → kept, report only. Kept despite −0.0055 classification accuracy (notebook 11.1, reason documented).
 - [x] **Rare categories** (notebook 11.4): `RareCategoryGrouper` (threshold learned per fold) tested at ≥ 10 / ≥ 30 rows → slightly worse for both tasks → off (`rare_category_min_count: 0`); the target encoder already shrinks rare categories.
-- [ ] **Outliers & skew** (`2.Outlier_detection.ipynb`):
-  - [ ] It reuses another project's code/columns (cell 24 `spend_vegetables_per_year`, …) and saves to `Data/cleaned_df` (wrong folder, no `.csv`) — rewrite for this dataset.
-  - [ ] 🔎 Skew goes up to 27.5 (`global_discount_total`), 21.3 (`prior_max_purchase_value`), 20.4 (`spend_365d`) → per-column decision: `log1p`, winsorise with caps fitted on train, or `RobustScaler`.
-  - [ ] Never drop outlier rows from test; any removal is train-only and its effect must be measured in CV.
+- [x] **Outliers & skew** -- rewritten for this dataset in `outlier_detection.ipynb` (team): rule-based correction (`prior_max_purchase_value <= prior_total_spend`), no statistical deletion or capping; log1p / winsorising / robust scaling / IQR / Isolation Forest / LOF / DBSCAN / K-Means / SOM compared with temporal CV, none reliably better. Documented in README §6.
+  - [ ] Re-run `outlier_detection.ipynb` so its tables are saved (its code cells have no saved outputs).
 - [x] **`clientes.csv` merge** (notebook 11.3–11.4, `customers` in config, `add_customer_features()`):
   - [x] Kept `country_or_region`, `commercial_region`, `island`, `municipality`, `customer_since_year` → `years_as_customer`; dropped `customer_type` (100% NaN), id-like `company_name`/`address`, half-empty `street`/`city`, high-cardinality postal codes.
   - [x] Every customer matched; `customer_since_year` never after the purchase year (no future info).
@@ -96,7 +94,7 @@ Facts below marked 🔎 were checked on the raw data while writing this list.
 - [x] Extra data issues found beyond the EDA (consistency rules, inflated values) added to `clean_dataset`.
 - [ ] Compare preprocessed models vs the week-2 baseline; explain why it improved (or didn't); state the current best model.
 - [ ] Leakage demo: fit scaler/encoder on the full data vs per fold and show the optimistic gap.
-- [ ] Sanity tests: `clean_dataset(test)` keeps 986 rows in the same order; works with targets absent; no NaN after `transform`; train/test column sets match.
+- [x] Sanity tests: `tests/test_pipeline.py` (8 tests, all passing) -- row-preserving and stateless `prepare_table`, works without targets, no NaN after `transform`, feature lists, indicators, fitted steps, schema, placeholders, save/load/predict.
 
 ---
 
@@ -106,3 +104,17 @@ Facts below marked 🔎 were checked on the raw data while writing this list.
 - [x] README → **Pipeline progress** log and **Best model** section.
 - [x] README → project structure matches the repository.
 - [x] Every notebook section (1–13) ends with a markdown conclusion or verdict.
+- [x] README reorganised around: cleaning & validation (placeholder tokens with frequency and treatment), inconsistencies, duplicates, feature selection, outlier detection, preprocessing pipeline.
+
+---
+
+## Team checklist (preprocessing pipeline, validation, duplicates, documentation)
+
+- [x] Numeric / categorical features defined in `config.yaml` (shared + `<task>.preprocessing.extra_*_features`).
+- [x] All feature names exist and lists don't overlap: `check_feature_lists()` (in `build_preprocessor()` and, with the data, in `main.py`).
+- [x] Missingness indicators through the `indicators` transformer: `MissingIndicator` inside the `ColumnTransformer`, on the original column.
+- [x] Every data-dependent operation (imputation, indicators, rare grouping, encoding, scaling) fitted inside the pipeline -- shown in notebook section 8 and tested.
+- [x] Complete pipeline fitted, saved, loaded and used to predict new records: `main.py` → `save_and_check()` / `predict_new_records()`, notebook section 8, `tests/test_pipeline.py`.
+- [x] Duplicates: `customer_id` validated (`validate_customer_ids()`, notebook 4.4); exact duplicates removed only if found (0 found).
+- [x] Validation function: standardised names, expected data types, valid ranges, allowed categories -- `validate_schema()` (first step of `prepare_table()`), `config.yaml` → `schema`, notebook 2.10.
+- [x] Missing values: placeholders reported with frequency and treatment -- `report_placeholders()`, `load_data(path, placeholder_tokens)`, notebook 2.2.
