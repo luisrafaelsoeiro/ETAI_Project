@@ -187,6 +187,10 @@ diagnostics:
     - rule: "abs(prior_mean_purchase_value - prior_total_spend / prior_purchase_count) <= 0.6 + 0.001 * prior_mean_purchase_value"
       when: "prior_purchase_count > 0"
       invalidate: prior_mean_purchase_value
+    # one previous purchase cannot be larger than the sum of all previous purchases
+    - rule: "prior_max_purchase_value <= prior_total_spend + 0.01"
+      when: "prior_purchase_count > 0"
+      invalidate: prior_max_purchase_value
 
   # NaN -> value implied by an identity between columns of the same row
   # (each identity holds for >= 99% of the rows where all terms are observed)
