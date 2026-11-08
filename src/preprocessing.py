@@ -9,9 +9,11 @@ From a cleaned table to a model-ready matrix, shared by both tasks:
 
 Feature lists and choices come from config.yaml (`preprocessing` and `<task>.preprocessing`).
 """
+import re
+
 import numpy as np
 import pandas as pd
-from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.base import BaseEstimator, TransformerMixin, clone
 from sklearn.compose import ColumnTransformer
 from sklearn.experimental import enable_iterative_imputer  # noqa: F401 -- makes IterativeImputer importable
 from sklearn.impute import IterativeImputer, KNNImputer, MissingIndicator, SimpleImputer
@@ -130,6 +132,63 @@ class RareCategoryGrouper(BaseEstimator, TransformerMixin):
         return np.asarray(input_features, dtype=object)
 
 
+def _referenced_names(expression: str) -> set:
+    return set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", str(expression)))
+
+
+class RowBoundedImputer(BaseEstimator, TransformerMixin):
+    """
+    Fitted step: imputes the numeric columns with `imputer`, then keeps every IMPUTED value
+    within the limits its own row implies (`bounds`, e.g. 365-day spend between the 180-day
+    spend and all prior spend). A single median ignores the rest of the row and can produce
+    impossible values; observed values are never changed.
+
+    `bounds`: {column: {"min": expression, "max": expression}}, evaluated on the imputed row
+    with DataFrame.eval; a limit that can't be computed for a row (NaN) is skipped, and `max`
+    wins if the two limits cross. `scaler` (KNN / iterative imputation): impute in scaled space,
+    so large-valued columns don't dominate distances, then return to the original units so the
+    limits can be compared -- the pipeline's own scaler follows this step.
+    """
+
+    def __init__(self, imputer, feature_names, bounds=None, scaler=None):
+        self.imputer = imputer
+        self.feature_names = feature_names
+        self.bounds = bounds
+        self.scaler = scaler
+
+    def _frame(self, X) -> pd.DataFrame:
+        frame = pd.DataFrame(X).astype("float64")
+        frame.columns = list(self.feature_names)
+        return frame
+
+    def fit(self, X, y=None):
+        X = self._frame(X)
+        self.scaler_ = clone(self.scaler).fit(X) if self.scaler is not None else None
+        self.imputer_ = clone(self.imputer).fit(X if self.scaler_ is None else self.scaler_.transform(X))
+        self.n_features_in_ = X.shape[1]
+        return self
+
+    def transform(self, X):
+        X = self._frame(X)
+        missing = X.isna()
+        filled = self.imputer_.transform(X if self.scaler_ is None else self.scaler_.transform(X))
+        if self.scaler_ is not None:
+            filled = self.scaler_.inverse_transform(filled)
+        out = pd.DataFrame(filled, columns=X.columns, index=X.index).where(missing, X)  # observed: exact
+        for column, limits in (self.bounds or {}).items():
+            for side in ("min", "max"):
+                if side not in limits:
+                    continue
+                limit = out.eval(str(limits[side]))
+                beyond = out[column] < limit if side == "min" else out[column] > limit
+                beyond &= missing[column] & limit.notna()
+                out.loc[beyond, column] = limit[beyond]
+        return out.to_numpy()
+
+    def get_feature_names_out(self, input_features=None):
+        return np.asarray(self.feature_names, dtype=object)
+
+
 def _numeric_imputer(imputation: dict):
     strategy = imputation.get("numeric_strategy", "median")
     if strategy == "knn":
@@ -168,6 +227,11 @@ def check_feature_lists(preprocessing_config: dict, available_columns=None) -> N
     orphan = sorted(set(indicator_sources) - set(groups["numeric_features"]) - set(groups["categorical_features"]))
     if orphan:
         problems.append(f"mnar_indicator_sources {orphan} are not numeric or categorical features")
+    for column, limits in preprocessing_config.get("imputation", {}).get("row_bounds", {}).items():
+        names = {column}.union(*(_referenced_names(e) for e in limits.values()))
+        outside = sorted(names - set(groups["numeric_features"]))
+        if outside:
+            problems.append(f"row_bounds of {column} use {outside}, which are not numeric features")
     if available_columns is not None:
         absent = sorted(set().union(*groups.values()) - set(available_columns))
         if absent:
@@ -182,9 +246,10 @@ def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
     section. Nothing is fitted here -- it is fitted later, inside the model's Pipeline, on
     training rows only. Every encoder tolerates categories never seen in training.
 
-    Numeric imputation: "median" / "mean" / "constant" impute then scale; "knn" and
-    "iterative" scale first, so distances / regressions are not dominated by the
-    large-valued columns. Categorical: impute, group rare categories, encode.
+    Numeric: `RowBoundedImputer` (impute -- "median" / "mean" / "constant" directly, "knn" /
+    "iterative" in scaled space so distances / regressions are not dominated by the
+    large-valued columns -- then keep imputed values within their row's limits,
+    `imputation.row_bounds`), then scale. Categorical: impute, group rare categories, encode.
     Indicators: `MissingIndicator` on the raw (not yet imputed) MNAR/MAR columns.
     """
     check_feature_lists(preprocessing_config)
@@ -198,11 +263,14 @@ def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
     scaler = scaler_factory() if callable(scaler_factory) else scaler_factory
     encoder = _ENCODERS[preprocessing_config["encoder"]](preprocessing_config.get("random_state"))
 
-    imputer = _numeric_imputer(imputation)
-    if imputation.get("numeric_strategy", "median") in ("knn", "iterative"):
-        numeric_pipeline = Pipeline([("scale", scaler), ("impute", imputer)])
-    else:
-        numeric_pipeline = Pipeline([("impute", imputer), ("scale", scaler)])
+    scale_before_imputing = imputation.get("numeric_strategy", "median") in ("knn", "iterative") and scaler != "passthrough"
+    numeric_pipeline = Pipeline([
+        ("impute", RowBoundedImputer(
+            _numeric_imputer(imputation), list(numeric_features), imputation.get("row_bounds", {}),
+            scaler=clone(scaler) if scale_before_imputing else None,
+        )),
+        ("scale", scaler),
+    ])
 
     categorical_strategy = imputation.get("categorical_strategy", "most_frequent")
     categorical_pipeline = Pipeline([

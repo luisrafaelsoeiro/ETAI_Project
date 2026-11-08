@@ -176,6 +176,20 @@ diagnostics:
     - column: spend_365d
       expression: "prior_total_spend"
       when: "customer_tenure_days <= 365"
+    # one previous purchase: it is the minimum, the maximum and the total at once (holds on
+    # 100% of the 466 / 469 observed rows); two previous purchases: min + max = total (100% of 387)
+    - column: prior_max_purchase_value
+      expression: "prior_total_spend"
+      when: "prior_purchase_count == 1"
+    - column: prior_min_purchase_value
+      expression: "prior_total_spend"
+      when: "prior_purchase_count == 1"
+    - column: prior_max_purchase_value
+      expression: "prior_total_spend - prior_min_purchase_value"
+      when: "prior_purchase_count == 2"
+    - column: prior_min_purchase_value
+      expression: "prior_total_spend - prior_max_purchase_value"
+      when: "prior_purchase_count == 2"
 
   # NaN that cannot exist ("not applicable") -> 0, with the flags below marking them (section 5.3)
   structural_fill:
@@ -193,6 +207,24 @@ diagnostics:
   flags:
     is_first_purchase: "prior_purchase_count == 0"
     has_gap_history: "prior_purchase_count >= 2"
+
+  # gaps filled from the SAME customer's earlier purchases (`fill_from_customer_history`,
+  # notebooks/05_imputation.ipynb). Past purchases only, never a later one and never a target.
+  # It runs after `prepare_table`, on every purchase known at prediction time (train.csv +
+  # test.csv); what it can't fill is left to the fitted imputers of the pipeline.
+  customer_history:
+    use: true
+    key: customer_id
+    date_column: purchase_date
+    order_column: prior_purchase_count
+    # the customer's last observed value: equals the actual value on 81-99% of purchases
+    # (most frequent value: 17-72%, warehouse 99.6% for both)
+    last_observed_columns: [payment_type, salesperson, transport_method, warehouse,
+                            commercial_zone, document_series]
+    # = date difference to the customer's previous purchase when that purchase is in the data
+    # (its prior_purchase_count is one lower): 100% of 6,669 observed rows. The recompute
+    # rules then run again, so prior_mean_gap_days follows from it
+    previous_purchase_gap: days_since_previous_purchase
 
   # purchase-time features (section 11): only information known at the moment of the
   # purchase -- the date itself, and ratios of columns of the same row. All are computed;
@@ -387,6 +419,16 @@ preprocessing:
   imputation:
     numeric_strategy: median          # median | mean | constant | knn | iterative (section 12)
     categorical_strategy: most_frequent
+    # after imputing, an IMPUTED value is kept within the limits its own row implies
+    # (`RowBoundedImputer`; observed values are never changed). Without it the median breaks
+    # these rules on 56% of the imputed spend_365d values (notebooks/05_imputation.ipynb)
+    row_bounds:
+      spend_365d: {min: spend_180d, max: prior_total_spend}
+      prior_max_purchase_value:
+        min: prior_mean_purchase_value
+        max: "prior_total_spend - (prior_purchase_count - 1) * prior_min_purchase_value"
+      days_since_previous_purchase: {max: customer_tenure_days}
+      prior_mean_gap_days: {max: customer_tenure_days}
   # 0 = off. Grouping categories under N training rows into "rare" was worse for both
   # tasks (section 11): the target encoder already shrinks rare categories
   rare_category_min_count: 0

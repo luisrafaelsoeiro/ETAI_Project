@@ -5,6 +5,9 @@ Cleaning rules shared by both tasks -- the diagnosis of preprocessing.ipynb turn
     impossible values -> NaN, consistency rules, exact recovery from identities, structural
     fill, flags, date parts, ratios, redundant columns, the customer-table join. They learn
     nothing from the data and keep every row, so they run on train.csv AND test.csv.
+  - history rule (`fill_from_customer_history`, run after `prepare_table`): gaps filled from
+    the same customer's earlier purchases. It reads other rows of the same customer -- past
+    ones only -- so it needs the purchase history, but it learns nothing and keeps every row.
   - training-data decision (`drop_training_rows`): removes almost-empty rows and duplicates
     from the labelled training file only, before the dev/test split.
 
@@ -163,6 +166,70 @@ def add_customer_features(df: pd.DataFrame, clientes: pd.DataFrame, customers_co
                        "values": int(unknown.sum()), "rule": ""})
         report.extend({**r, "step": f"customers: {r['step']}"} for r in join_report.to_dict("records"))
     return out
+
+
+def fill_from_customer_history(df: pd.DataFrame, history: pd.DataFrame, diagnostics_config: dict,
+                               id_column: str = "id"):
+    """
+    Fills gaps from the SAME customer's EARLIER purchases (`diagnostics.customer_history`):
+      - `last_observed_columns`: the customer's last observed value before this purchase
+        (customers keep their payment type, salesperson, ... from one purchase to the next);
+      - `previous_purchase_gap`: the date difference to the customer's previous purchase, when
+        that purchase is in the data and is the immediately previous one (its prior purchase
+        count is exactly one lower);
+    then `recompute_rules` run again, so values that follow from a filled one (the mean gap
+    between purchases) are recovered too.
+
+    Past purchases only, so nothing comes from the future, and no target is read: the same
+    information a prediction-time system has. `history` is every purchase known at prediction
+    time, prepared by `prepare_table` and not yet filled (train.csv + test.csv); `df`'s own rows
+    may be part of it. Rows without a date are neither filled nor used. Row-preserving.
+    Returns (df, report).
+    """
+    rules = diagnostics_config.get("customer_history", {})
+    out = df.copy()
+    if not rules.get("use", False):
+        return out, pd.DataFrame(columns=["step", "column", "values", "rule"])
+    key, date, order = rules["key"], rules["date_column"], rules["order_column"]
+    columns = [c for c in rules.get("last_observed_columns", []) if c in out.columns]
+    gap_column = rules.get("previous_purchase_gap")
+    needed = [id_column, key, date, order] + columns + ([gap_column] if gap_column else [])
+
+    pool = pd.concat([history[needed], out[needed]]).drop_duplicates(subset=id_column, keep="last")
+    pool = pool[pool[date].notna()].sort_values([key, date, order], kind="mergesort").reset_index(drop=True)
+    groups = pool.groupby(key, sort=False)
+    report = []
+
+    for column in columns:
+        # last observed value strictly before each purchase: shift one purchase back, then carry forward
+        earlier = groups[column].shift(1).astype(object)
+        last_observed = earlier.groupby(pool[key]).ffill()
+        fill = out[id_column].map(pd.Series(last_observed.to_numpy(), index=pool[id_column]))
+        mask = out[column].isna() & fill.notna()
+        was_category = isinstance(out[column].dtype, pd.CategoricalDtype)
+        values = out[column].astype(object)
+        values[mask] = fill[mask]
+        out[column] = values.astype("category") if was_category else values
+        report.append({"step": "filled from the customer's last earlier purchase", "column": column,
+                       "values": int(mask.sum()), "rule": "last observed value, past purchases only"})
+
+    if gap_column:
+        consecutive = (pool[order] - groups[order].shift(1)) == 1
+        gap = (pool[date] - groups[date].shift(1)).dt.days.where(consecutive)
+        fill = out[id_column].map(pd.Series(gap.to_numpy(), index=pool[id_column]))
+        mask = out[gap_column].isna() & fill.notna()
+        out.loc[mask, gap_column] = fill[mask]
+        report.append({"step": "filled from the customer's previous purchase date", "column": gap_column,
+                       "values": int(mask.sum()), "rule": "purchase_date - previous purchase_date (count one lower)"})
+
+    names = lambda rule: re.findall(r"[A-Za-z_][A-Za-z0-9_]*", " ".join([rule["column"], rule["expression"], rule.get("when", "")]))
+    usable = [r for r in diagnostics_config.get("recompute_rules", []) if set(names(r)) <= set(out.columns)]
+    recomputed = apply_recompute_rules(out, usable)
+    report = pd.concat([pd.DataFrame(report), recomputed.assign(step="recomputed after the history fill")],
+                       ignore_index=True)
+    if len(out) != len(df) or not out.index.equals(df.index):
+        raise AssertionError("fill_from_customer_history must keep every row, in the same order.")
+    return out, report[report["values"] > 0].reset_index(drop=True)
 
 
 def clean_dataset(df: pd.DataFrame, diagnostics_config: dict):

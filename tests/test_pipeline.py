@@ -32,7 +32,8 @@ from src.customers import prepare_customers  # noqa: E402
 from src.data import load_data, report_placeholders, standardize_columns, validate_schema  # noqa: E402
 from src.evaluate import select_scoring, temporal_folds  # noqa: E402
 from src.pipeline import build_pipeline, predict_new_records, prepare_task_data  # noqa: E402
-from src.preprocessing import build_preprocessor, check_feature_lists  # noqa: E402
+from src.cleaning import clean_dataset, fill_from_customer_history  # noqa: E402
+from src.preprocessing import RowBoundedImputer, build_preprocessor, check_feature_lists  # noqa: E402
 from src.results import save_predictions  # noqa: E402
 from src.tasks import TASKS  # noqa: E402
 from src.tuning import nested_cross_validate, tune_pipeline  # noqa: E402
@@ -115,8 +116,8 @@ def test_data_dependent_steps_are_fitted_inside_the_pipeline_on_training_rows_on
     prep = pipeline.named_steps["prep"]
     numeric_features = data["preprocessing_config"]["numeric_features"]
     imputer = prep.named_transformers_["numeric"].named_steps["impute"]
-    assert isinstance(imputer, SimpleImputer)
-    learned = pd.Series(imputer.statistics_, index=numeric_features)
+    assert isinstance(imputer, RowBoundedImputer) and isinstance(imputer.imputer_, SimpleImputer)
+    learned = pd.Series(imputer.imputer_.statistics_, index=numeric_features)
     assert np.allclose(learned, X_train[numeric_features].median()), "medians must come from the training rows"
     assert not np.allclose(learned, data["X_dev"][numeric_features].median()), "medians must not see the other rows"
 
@@ -141,6 +142,57 @@ def test_prepare_table_keeps_every_row_and_is_stateless():
         numeric = table.select_dtypes("number").columns
         assert np.allclose(alone[numeric].to_numpy(dtype=float), table.iloc[[position]][numeric].to_numpy(dtype=float),
                            equal_nan=True), "a row must be cleaned the same way alone or inside a table"
+
+
+def test_exact_recovery_of_prior_max_and_min():
+    cfg = config()
+    table = pd.DataFrame({"prior_purchase_count": [1, 1, 2, 2], "prior_total_spend": [80.0, 50.0, 100.0, 90.0],
+                          "prior_max_purchase_value": [np.nan, 50.0, np.nan, 60.0],
+                          "prior_min_purchase_value": [80.0, np.nan, 30.0, np.nan]})
+    rules = [r for r in cfg["diagnostics"]["recompute_rules"] if r["column"].startswith(("prior_max", "prior_min"))]
+    out, _ = clean_dataset(table, {"recompute_rules": rules})
+    assert out["prior_max_purchase_value"].tolist() == [80.0, 50.0, 70.0, 60.0]
+    assert out["prior_min_purchase_value"].tolist() == [80.0, 50.0, 30.0, 30.0]
+
+
+def test_history_fill_uses_the_customers_past_purchases_only():
+    cfg = config()
+    day = pd.Timestamp("2024-01-01")
+    history = pd.DataFrame({
+        "id": [1, 2, 3, 4, 5],
+        "customer_id": [7, 7, 7, 7, 8],
+        "purchase_date": [day, day + pd.Timedelta(days=10), day + pd.Timedelta(days=25), day + pd.Timedelta(days=40), day],
+        "prior_purchase_count": [0, 1, 2, 4, 0],                      # id 4: one purchase is not in the data
+        "payment_type": ["A", None, "B", None, None],
+        "days_since_previous_purchase": [0.0, 10.0, np.nan, np.nan, 0.0],
+        "customer_tenure_days": [0.0, 10.0, 25.0, 40.0, 0.0],
+        "prior_mean_gap_days": [0.0, 0.0, np.nan, np.nan, 0.0],
+        "prior_total_spend": [0.0, 1.0, 2.0, 4.0, 0.0],
+    })
+    diagnostics = {**cfg["diagnostics"], "customer_history": {**cfg["diagnostics"]["customer_history"],
+                                                              "last_observed_columns": ["payment_type"]}}
+    out, _ = fill_from_customer_history(history, history, diagnostics, "id")
+    # id 2 gets A (its past); id 4 gets B, the LAST observed value; id 1 / id 5 have no past -> stay missing
+    assert out["payment_type"].tolist()[1:4] == ["A", "B", "B"] and out["payment_type"].isna().sum() == 1
+    assert out.loc[2, "days_since_previous_purchase"] == 15, "date difference to the previous purchase"
+    assert out.loc[2, "prior_mean_gap_days"] == 10, "then recomputed from the identity (25 - 15) / (2 - 1)"
+    assert pd.isna(out.loc[3, "days_since_previous_purchase"]), "the previous purchase is missing from the data"
+    later_only = fill_from_customer_history(history.iloc[[1]], history.iloc[[1, 2]], diagnostics, "id")[0]
+    assert later_only["payment_type"].isna().all(), "a later purchase must never fill an earlier one"
+
+
+def test_row_bounds_only_change_imputed_values():
+    features = ["spend_180d", "spend_365d", "prior_total_spend"]
+    imputer = RowBoundedImputer(SimpleImputer(strategy="median"), features,
+                                {"spend_365d": {"min": "spend_180d", "max": "prior_total_spend"}})
+    train = pd.DataFrame({"spend_180d": [0, 10, 20, 30.0], "spend_365d": [500, 500, 500, 500.0],
+                          "prior_total_spend": [900, 900, 900, 900.0]})
+    imputer.fit(train)
+    # row 3: an observed value above its limit is NOT touched (consistency rules handle those)
+    new = pd.DataFrame({"spend_180d": [600, 10, 10, 1.0], "spend_365d": [np.nan, np.nan, 2000, np.nan],
+                        "prior_total_spend": [1000, 100, 1500, np.nan]})
+    out = imputer.transform(new)[:, 1]
+    assert out.tolist() == [600, 100, 2000, 500], "raised to the 180-day spend, cut to the total, observed kept, NaN limit skipped"
 
 
 def test_schema_validation_flags_and_repairs():
@@ -186,7 +238,7 @@ def test_complete_pipeline_can_be_fitted_saved_loaded_and_predict_new_records():
             loaded = joblib.load(path)
         assert np.allclose(loaded.predict(data["X_kaggle"]), pipeline.predict(data["X_kaggle"]))
         new_records = data["kaggle_raw"].sample(3, random_state=0)
-        predictions = predict_new_records(new_records, cfg, task, loaded, data["clientes"])
+        predictions = predict_new_records(new_records, cfg, task, loaded, data["clientes"], data["history"])
         positions = data["kaggle_raw"].index.get_indexer(new_records.index)
         assert np.allclose(predictions, pipeline.predict(data["X_kaggle"].iloc[positions]))
         assert len(predictions) == 3 and np.isfinite(predictions).all()

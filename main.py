@@ -158,7 +158,7 @@ def run_task(config: dict, task: str, run: str) -> None:
     predictions = loaded.predict(data["X_kaggle"])
     if not np.allclose(predictions, final_model.predict(data["X_kaggle"])):
         raise AssertionError("The reloaded pipeline predicts differently from the fitted one.")
-    one_record = predict_new_records(data["kaggle_raw"].head(1), config, task, loaded, data["clientes"])
+    one_record = predict_new_records(data["kaggle_raw"].head(1), config, task, loaded, data["clientes"], data["history"])
     if not np.allclose(one_record, predictions[:1]):
         raise AssertionError("A single raw record is not predicted like the same row of test.csv.")
     predictions_path = Path(output.get("predictions_dir", "results/predictions")) / f"{task}.csv"
