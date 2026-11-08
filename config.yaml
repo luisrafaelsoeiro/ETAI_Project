@@ -212,13 +212,77 @@ diagnostics:
   # training only: rows where everything except these is missing are dropped (section 2.4)
   almost_empty_preserved_columns: [id, customer_id, repeat_purchase_90d]
 
-# optional customer table, joined on customer_id (`add_customer_features`; section 11)
+# Customer table (clientes.csv): master data, one row per customer, prepared by
+# src/customers.py -> prepare_customers and joined by add_customer_features. Every step is a rule
+# on the static table (no purchase row, no label). Evidence: notebooks/04_customer_table.ipynb
 customers:
   use: true
   key: customer_id
-  columns: [country_or_region, commercial_region, island, municipality, customer_since_year]
+  # 1. validation of clientes.csv itself
+  schema:
+    required_columns: [customer_id, country_or_region, commercial_region, island, municipality, city,
+                       postal_area, postal_code, street, address, customer_type, company_name,
+                       customer_since_year]
+    expected_types:
+      numeric: [customer_id, customer_since_year]
+      integer: [customer_id, customer_since_year]
+    ranges:
+      customer_id: {min: 1}
+      customer_since_year: {min: 1990, max: 2030}
+    allowed_categories:
+      country_or_region: 'Country CT\d+: .+'
+      commercial_region: 'Region RG\d+: .+'
+      island: 'Island IS\d+: .+'
+      municipality: 'Municipality MU\d+: .+'
+      city: 'City CY\d+: .+'
+      postal_area: 'Postal area PA\d+: .+'
+      postal_code: 'Postal code PC\d+: .+'
+      street: 'Street ST\d+: .+'
+      address: 'Address AD\d+: .+'
+      company_name: '.+ \d+'
+  # 3. near-duplicates to report (never merged: different ids are different accounts)
+  near_duplicate_columns: [company_name, address]
+  # 5. every label is "<prefix> <code>: <filler text>"; one code always has the same label, so
+  #    the code alone keeps all the information ("#REF!" in postal codes is filler text, not an error)
+  code_pattern: '([A-Z]{2}\d+):'
+  code_columns: [country_or_region, commercial_region, island, municipality, city, postal_area,
+                 postal_code, street, address]
+  # 6. data-quality signal: address fields the record has, counted before any recovery
+  profile_columns: [commercial_region, municipality, city, postal_area, postal_code, street]
+  # 7. the geography is a strict hierarchy (each municipality / postal area / postal code / island
+  #    belongs to one region): checked, then used to recover missing levels exactly
+  hierarchy_checks:
+    - [commercial_region, country_or_region]
+    - [island, commercial_region]
+    - [municipality, commercial_region]
+    - [postal_area, commercial_region]
+    - [postal_code, postal_area]
+    - [postal_area, municipality]
+    - [city, municipality]
+  hierarchy_recovery:
+    - {column: commercial_region, from: [postal_area, postal_code, municipality, city]}
+    - {column: municipality, from: [postal_code, city]}
+  # 8. islands exist only in 2 regions: elsewhere the island is undefined, not missing
+  structural_fill:
+    island: {parent: commercial_region, value: none}
+  # 9. levels with few customers act like customer ids; backing off to the parent level was
+  #    tested (municipality < 5 / 10 / 20 customers -> its region) and was NOT better: the target
+  #    encoder already shrinks small groups -> off. To switch on, e.g.:
+  #    municipality: {min_customers: 10, fallback_column: commercial_region}
+  #    country_or_region: {min_customers: 10, fallback: other}
+  rare_level_backoff: {}
+  # 10. flags: customer_since_year = 2015 is the first year of the records -> "already a
+  #     customer when the records start" (664 of 1,143), not a 2015 sign-up
+  flags:
+    customer_since_before_records: "customer_since_year <= 2015"
+  # columns kept from the customer table and joined to every purchase
+  columns: [country_or_region, commercial_region, island, municipality, profile_completeness,
+            customer_since_before_records, customer_since_year]
   derived_features:
     years_as_customer: "purchase_date.dt.year - customer_since_year"
+  # a purchase can't happen before the customer existed
+  consistency_rules:
+    - {rule: "years_as_customer >= 0", invalidate: years_as_customer}
   drop_after_derive: [customer_since_year]
 
 # Compact storage types applied after the stateless cleaning rules. Monetary values and
@@ -238,6 +302,8 @@ dtypes:
     - purchase_month
     - purchase_weekday
     - years_as_customer
+    - profile_completeness
+    - customer_since_before_records
   Int32: [id, customer_id]
   category:
     - payment_type
@@ -396,7 +462,9 @@ regression:
     scaler: minmax
     # section 11: date parts (41 RMSE, 5/5 folds) and customer features (39 RMSE) lower
     # RMSE; the derived ratios add nothing
-    extra_numeric_features: [purchase_month, purchase_weekday, years_as_customer]
+    # notebooks/04_customer_table.ipynb: + profile completeness and "customer before the records"
+    extra_numeric_features: [purchase_month, purchase_weekday, years_as_customer, profile_completeness,
+                             customer_since_before_records]
     extra_categorical_features: [country_or_region, commercial_region, island, municipality]
     # section 12: an explicit "Missing" category: island is 34% missing and the gap is related
     # to the target (only 0.5 RMSE better than most frequent -- kept, not decisive either way)

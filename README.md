@@ -58,7 +58,7 @@ The notebooks in `notebooks/` run with the same environment and find the project
 ### What `python main.py` does, per task
 
 1. **Load and validate**: placeholder tokens → `NaN`, placeholder report, schema validation (types, ranges, allowed categories) and `customer_id` checks.
-2. **Clean** with stateless rules (train.csv and test.csv alike), join the customer table, and remove almost-empty rows and duplicates from the training file only.
+2. **Clean** with stateless rules (train.csv and test.csv alike), prepare and join the customer table (`src/customers.py`), and remove almost-empty rows and duplicates from the training file only.
 3. **Lock the temporal test set**: the latest 20% of purchases, with a 90-day gap.
 4. **Cross-validate** the configured pipeline (preprocessing + model) on 5 expanding-window temporal folds, against a dummy floor, on every configured metric. The out-of-fold predictions feed the report.
 5. **Optional tuning:** Optuna with nested temporal cross-validation.
@@ -104,11 +104,14 @@ ETAI_Project/
 │
 ├── notebooks/                      # evidence for every decision (they import the pipeline's own code)
 │   ├── 01_preprocessing.ipynb      # diagnosis, cleaning, missingness, recipe, encoder x scaler, models, ablations, imputers
-│   └── 02_outlier_detection.ipynb  # data errors vs valid extremes, transformations and row removal in temporal CV
+│   ├── 02_outlier_detection.ipynb  # data errors vs valid extremes, transformations and row removal in temporal CV
+│   ├── 03_feature_engineering_selection.ipynb   # redundancy, relevance, permutation importance (in progress)
+│   └── 04_customer_table.ipynb     # full preprocessing of clientes.csv, tested in temporal CV
 │
 ├── src/                            # shared by both tasks
 │   ├── data.py                     # loading, placeholder report, column names, schema and customer_id validation, dtypes
-│   ├── cleaning.py                 # stateless cleaning rules, prepare_table, training-only row removal
+│   ├── cleaning.py                 # stateless cleaning rules, customer join, prepare_table, training-only row removal
+│   ├── customers.py                # customer table (clientes.csv): validation, codes, hierarchy recovery, structural fill
 │   ├── preprocessing.py            # (X, y, extras), locked test split, the fitted recipe (ColumnTransformer)
 │   ├── pipeline.py                 # build / save / load the pipeline, prepare_task_data, predict_new_records
 │   ├── evaluate.py                 # temporal folds, cross-validation, comparisons, CV report
@@ -167,13 +170,14 @@ See `data/README.md` for the files and the column dictionary. Each row is a **cu
 | Data quality + additions + imputers | Accounting identity explained; consistency rules fix inflated values; purchase-time features, customer table and rare-category grouping tested by ablation; 5 numeric and 2 categorical imputers compared in CV | `src/cleaning.py`, `src/evaluate.py`, notebook sections 5.2, 11, 12 |
 | Data types + outliers | Compact dtypes (`standardize_dtypes`); `prior_max_purchase_value ≤ prior_total_spend` rule; outlier analysis with temporal validation (no statistical deletion or capping) | `config.yaml` → `dtypes`, `notebooks/02_outlier_detection.ipynb` |
 | Validation + pipeline checks | Placeholder-token report and NaN-on-load; schema validation; `customer_id` validation; feature-list checks; missing indicators inside the pipeline; save → load → predict new records | `src/data.py`, `src/pipeline.py`, `tests/`, notebook sections 2.2, 2.10, 4.4, 8 |
+| Customer table | Full preprocessing of clientes.csv: validation, key and duplicate checks, labels → codes, exact recovery through the geographic hierarchy, island as structural `"none"`, "customer before the records" flag, profile completeness, rare-level back-off (tested, off) | `src/customers.py`, `config.yaml` → `customers`, `notebooks/04_customer_table.ipynb` |
 | Repository reorganisation | Baseline-pipeline structure. Shared code split into `src/data`, `cleaning`, `preprocessing`, `pipeline`, `evaluate`, `tuning`, `results`; task packages reduced to what differs (`preprocessing`, `model`, `evaluate`). `main.py` runs the full workflow (dummy floor, temporal CV, optional Optuna + nested CV, scoreboard, run reports, optional locked-test evaluation, saved models, Kaggle predictions). Notebooks moved to `notebooks/`; redundant files removed | whole repository |
 
 ---
 
 ## Preprocessing Decisions
 
-Every decision below is backed by evidence in `notebooks/01_preprocessing.ipynb` (section numbers in brackets) or `notebooks/02_outlier_detection.ipynb`, and stored as a rule in `config.yaml`. A column-by-column summary is at the end (§12).
+Every decision below is backed by evidence in `notebooks/01_preprocessing.ipynb` (section numbers in brackets), `notebooks/02_outlier_detection.ipynb` or `notebooks/04_customer_table.ipynb`, and stored as a rule in `config.yaml`. A column-by-column summary is at the end (§12).
 
 ### 1. Where each step runs
 
@@ -261,7 +265,7 @@ For each remaining gap we tested whether *being missing* is related to the targe
 | `payment_type`, `salesperson`, `transport_method`, `warehouse` | ~3% each, never on the same rows | target rate 0.55–0.64 vs 0.56, no significant relation | MCAR | most frequent (regression: `"Missing"`, §10) |
 | `spend_365d` | 182 rows (2.8%) | MCAR in the raw data (tenure p = 0.84); after the identity fill only tenure > 365 days stays missing | MAR | median **+ missing indicator** (`MissingIndicator` in the pipeline) |
 | `prior_max_purchase_value` | 45 rows (0.7%) | the inflated maxima set to `NaN` in §3; repurchase rate 0.53 vs 0.56 (p = 0.84); only associated with `transport_method` (80 levels) | gap marks a corrupted value | median, **no indicator**: a flag would teach the model to recognise the corruption |
-| `island`, `municipality`, `commercial_region` (customer table, regression only) | 33.8% / 3.4% / 0.5% | related to other geography and transaction features; `island` and `municipality` also to the target | MAR | explicit `"Missing"` category, which acts as the indicator for a categorical column |
+| `commercial_region`, `island`, `municipality` (customer table, regression only) | 0.5% / 0.5% / 3.4% | what is left after the customer-table preprocessing (§13): a blank island is structural (`"none"`), and regions are recovered exactly. The rest are incomplete customer profiles, related to other geography (`municipality` also to the target) | MAR | explicit `"Missing"` category, which acts as the indicator for a categorical column (§10) |
 
 An automatic `SimpleImputer(add_indicator=True)` would flag every column with gaps, including the MCAR ones, where a flag only adds noise. We flag only where the evidence says the gap carries information (`preprocessing.mnar_indicator_sources`).
 
@@ -318,15 +322,16 @@ Training goes from 6,534 to 6,469 rows. **test.csv keeps all 986 rows**, and the
 | `random_noise` | removed | noise by name and by evidence (correlation with the target −0.012) |
 | `id`, `customer_id`, `purchase_date` | never model inputs (kept in `extras`) | identifiers; needed for the temporal split and the submission |
 | the other task's target | removed from `X` in both tasks | target leakage |
-| date parts (`purchase_month`, `purchase_weekday`) | **regression only** | 41 RMSE better on all 5 folds; no effect on classification (+0.001) |
-| customer table: `country_or_region`, `commercial_region`, `island`, `municipality`, `years_as_customer` | **regression only** | 39 RMSE better. For classification it is decisively worse (0.005 better without) |
+| date parts (`purchase_month`, `purchase_weekday`) | **regression only** | 42 RMSE better on all 5 folds; no effect on classification (+0.002) |
+| customer table: `country_or_region`, `commercial_region`, `island`, `municipality`, `years_as_customer` | **regression only** | 40 RMSE better. For classification it is decisively worse (0.004 better without) |
+| `profile_completeness`, `customer_since_before_records` (§13) | **regression only** | 2 RMSE better than without them (3/5 folds), with a clear reason: long-standing accounts repurchase more and spend more; incomplete profiles repurchase less |
 | unused `clientes.csv` columns | not used | `customer_type` 100% missing; `company_name`, `address` act as a customer id; `street`, `city` ~50% missing with hundreds of levels; postal codes covered by the kept geography |
 | ratios: `margin`, `margin_rate`, `discount_rate`, `avg_line_value`, `spend_share_30d/90d` | computed, not used | no effect for either task (±0.001 accuracy, ±1 RMSE) |
 | rare-category grouping (`RareCategoryGrouper`, < 10 / < 30 training rows) | off | classification −0.007 (decisive) / −0.005; regression noise. The target encoder already shrinks rare categories |
 
 Every feature used is known at the moment of the purchase. The customer join adds no future information: every customer is found, and no purchase predates `customer_since_year`. **Final sets:**
 * **classification:** 26 numeric + 6 categorical + 2 flags + 1 missing indicator = 35 model columns;
-* **regression:** 29 numeric + 10 categorical + 2 flags + 1 missing indicator.
+* **regression:** 31 numeric + 10 categorical + 2 flags + 1 missing indicator.
 
 ### 6. Outlier detection (`notebooks/02_outlier_detection.ipynb`)
 
@@ -339,7 +344,7 @@ The outlier analysis separates **data errors** from **valid extremes**. Its prin
 |---|---|
 | Logical consistency rules | **Used.** They find impossible values from feature definitions, including `prior_max_purchase_value > prior_total_spend` (45 train / 6 test values → `NaN` → imputed in the pipeline). |
 | IQR | Diagnostic only. It fails on zero-heavy columns, and removing rows flagged in 3+ columns seriously harms the regression. |
-| `log1p` of skewed columns | Plausible for monetary values. Classification: +0.007 accuracy, not decisive. Regression: 0.4 RMSE better (2 SE), decisive on paper but negligible (0.02% of 1,947), so not worth the extra step. |
+| `log1p` of skewed columns | Plausible for monetary values. Classification: +0.007 accuracy, not decisive. Regression: 0.3 RMSE better (1.9 SE), not decisive and negligible (0.02% of 1,943). |
 | Winsorisation (1%–99%) | Small changes, no reliable improvement, and it discards real magnitude information. Not used. |
 | Robust scaling | Not reliably better than the task-specific scalers already chosen (§9). |
 | Isolation Forest | The most reasonable optional multivariate diagnostic, but the rows it flags are often valuable high-repeat or high-spend customers, and removing them is not reliably better. |
@@ -377,7 +382,7 @@ Every comparison uses these folds, and two options are compared **fold by fold**
 
 | Step | Classification | Regression | What it does |
 |---|---|---|---|
-| `numeric` | 26 amount, count and history columns | the same 26 + `purchase_month`, `purchase_weekday`, `years_as_customer` | median imputer → scaler (standard / min-max) |
+| `numeric` | 26 amount, count and history columns | the same 26 + `purchase_month`, `purchase_weekday`, `years_as_customer`, `profile_completeness`, `customer_since_before_records` | median imputer → scaler (standard / min-max) |
 | `categorical` | 6 transaction categories | the same 6 + 4 customer-table categories | imputer (most frequent / `"Missing"`) → rare-category grouping (off) → target encoder |
 | `indicators` | `MissingIndicator` on `spend_365d` | the same | 0/1 column for each `mnar_indicator_sources` column, computed on the **original** column before the imputer fills it |
 | `flags` | `is_first_purchase`, `has_gap_history` | the same | passed through |
@@ -410,7 +415,7 @@ All 16 combinations (one-hot, ordinal, count, target × none, standard, min-max,
 | Task | Chosen | Validation | Reason |
 |---|---|---|---|
 | Classification | **target + standard** | accuracy 0.707 | Target + min-max ranks first but is tied (+0.002, SE 0.007), and so is target + robust, so the current pair stays. Ahead of one-hot (+0.006, not decisive) with one column per feature. Count encoding takes the bottom 4 places; no scaling drops target encoding to 0.694. |
-| Regression | **target + min-max** | RMSE 2035 | Ranks first, and min-max is the best scaler for every encoder. Ordinal + min-max is a tie (7 RMSE, SE 10) but would impose a fake order. It beats target + robust by 164 RMSE on all 5 folds. |
+| Regression | **target + min-max** | RMSE 2052 | Ranks first, and min-max is the best scaler for every encoder. Ordinal + min-max is a tie (11 RMSE, SE 13) but would impose a fake order. It beats target + robust by 172 RMSE on all 5 folds. |
 
 ### 10. Alternative imputers [12]
 
@@ -418,14 +423,15 @@ Each imputer is fitted inside each fold. KNN and iterative impute after scaling.
 
 | Imputer | Classification (accuracy vs median) | Regression (RMSE vs median) |
 |---|---|---|
-| numeric `mean` | +0.0005 | 3.1 better |
-| numeric `constant` (0) | +0.0010 (decisive, 3/5 folds) | 2.9 better |
-| numeric `knn` (5 neighbours) | +0.0005 | 11.2 better (3/5 folds, not decisive) |
-| numeric `iterative` | −0.0005 | 4.3 better |
-| categorical: the alternative to the current one | `"Missing"`: −0.0007 | most frequent: 0.5 worse |
+| numeric `mean` | +0.0005 | 2.1 better |
+| numeric `constant` (0) | +0.0010 (decisive, 3/5 folds) | 0.2 worse |
+| numeric `knn` (5 neighbours) | +0.0005 | **6.0 better (5/5 folds, decisive)** |
+| numeric `iterative` | −0.0005 | 0.8 better |
+| categorical: the alternative to the current one | `"Missing"`: −0.0007 | most frequent: 2.6 worse (4/5 folds) |
 
-* **Numeric: the median stays for both tasks.** Every difference is far below the fold-to-fold spread (±0.017 accuracy, ±160 RMSE). For classification, `constant` is decisive but worth only 0.001 accuracy, and 0 already means "not applicable" in this pipeline (§2.6). Filling real gaps with 0 would merge two situations.
-* **Categorical:** the regression keeps an explicit `"Missing"` category: the customer columns have informative gaps (`island` 34% missing, related to the target). Classification keeps the most frequent value, since its categorical gaps are MCAR.
+* **Classification: the median stays.** `constant` is decisive but worth only 0.001 accuracy, and 0 already means "not applicable" in this pipeline (§2.6). Filling real gaps with 0 would merge two situations.
+* **Regression: a pending decision.** Since the customer-table preprocessing (§13), KNN is decisively better than the median: 6 RMSE, better on all 5 folds. By the rule in §7 it is a candidate to switch to (`regression.preprocessing.imputation.numeric_strategy: knn`). It is kept for confirmation after tuning, because the gain is small next to the fold-to-fold spread (±165 RMSE) and KNN makes every fit slower.
+* **Categorical:** the regression keeps an explicit `"Missing"` category: the remaining customer gaps are incomplete profiles related to the target, and filling them with the most common region or municipality would hide that. Classification keeps the most frequent value, since its categorical gaps are MCAR.
 
 ### 11. Recipe + model = one Pipeline [10]
 
@@ -434,12 +440,12 @@ Mean temporal-CV scores on the development set, with each task's final recipe:
 | Model | Classification accuracy (train / validation) | Regression RMSE (train / validation) |
 |---|---|---|
 | Dummy (floor to beat) | 0.553 / 0.553 | 1940 / 2472 |
-| Logistic regression / ridge | 0.712 / **0.707** | 1492 / 2035 |
-| Decision tree (depth 5) | 0.739 / 0.644 | 1220 / 2425 |
-| Random forest (300 trees) | 0.851 / 0.707 | 989 / **1947** |
+| Logistic regression / ridge | 0.712 / **0.707** | 1487 / 2052 |
+| Decision tree (depth 5) | 0.739 / 0.644 | 1219 / 2522 |
+| Random forest (300 trees) | 0.851 / 0.707 | 988 / **1943** |
 
 * **Classification → logistic regression.** It beats the dummy on every fold (+0.154), with no train/validation gap. The random forest ties it (0.0002 ahead, not decisive) and overfits, so the simpler model stays.
-* **Regression → random forest, target in euros.** It has the lowest RMSE (R² ≈ 0.33) and beats the dummy on every fold (−524 RMSE). Its edge over ridge is not decisive (88 ± 66, 3 of 5 folds), and it overfits, which tuning should address.
+* **Regression → random forest, target in euros.** It has the lowest RMSE (R² ≈ 0.33) and beats the dummy on every fold (−528 RMSE). Its edge over ridge is not decisive (108 ± 77, 3 of 5 folds), and it overfits, which tuning should address.
 
 The main metric is accuracy for classification and RMSE for regression (`<task>.metric`). F1, ROC-AUC, MAE and R² are also reported.
 
@@ -469,14 +475,43 @@ The main metric is accuracy for classification and RMSE for regression (`<task>.
 | `random_noise` | — | correlation with target −0.012 | dropped | pure noise |
 | `repeat_purchase_90d` | — | complete | classification target, never imputed | — |
 | `spend_next_90d` | missing for all non-repeaters and 5.4% of repeaters | structural + not MCAR | regression trains on observed rows only; no log transform | a target is never imputed; log1p was worse |
-| `country_or_region`, `commercial_region`, `island`, `municipality` (`clientes.csv`) | up to 34% missing (`island`) | MAR, related to the target | regression only: `"Missing"` → target encoder | lowers RMSE; the gap is informative |
-| `customer_since_year` (`clientes.csv`) | — | never after the purchase year | → `years_as_customer` (regression) | known at purchase time |
-| other `clientes.csv` columns | 100% missing / id-like / hundreds of levels | — | not used | no usable signal |
+| `country_or_region`, `commercial_region`, `island`, `municipality` (`clientes.csv`) | labels with filler text; region 10% missing; island 51% blank; 183 municipalities | strict geographic hierarchy; island undefined outside 2 regions | labels → codes; region recovered exactly (71); island → `"none"` (535); regression only: `"Missing"` → target encoder | correct values first; lowers RMSE |
+| `customer_since_year` (`clientes.csv`) | 664 of 1,143 customers dated 2015, the first year of the records | never after the purchase year; 2015 = "before the records start" | → `years_as_customer` at the purchase + `customer_since_before_records` flag (regression) | known at purchase time; the flag separates long-standing accounts |
+| `profile_completeness` (derived) | — | customers with 1–2 address fields repurchase less | regression feature | data-quality signal |
+| other `clientes.csv` columns | `customer_type` 100% missing; company name / address unique per customer; city, postal codes, street hundreds of levels | — | not used | no usable signal (id-like) |
+
+### 13. Customer table (`clientes.csv`) [notebook 04]
+
+`clientes.csv` is master data: one row per customer, no target, no purchase dates. Every step is a rule on that static table, so it runs identically for training, test.csv and new records (`src/customers.py` → `prepare_customers`, rules in `config.yaml` → `customers`). The cleaned table is joined to every purchase by `add_customer_features`.
+
+| Step | Finding | Treatment |
+|---|---|---|
+| Load | blank cells are the only placeholder (3,385) | → `NaN` on load |
+| Validate | all 13 columns present; ids and years whole numbers; years 2015–2026; every label follows its pattern | `validate_schema` with `customers.schema` |
+| Key | `customer_id` present and unique (1,143) | `check_customer_key` stops the pipeline otherwise (a repeated key would duplicate purchases) |
+| Duplicates | no exact duplicates. 2 company names twice: "Ltd 384" is two accounts at the same address, both with purchases; "Ltd 664" is a probable duplicate profile without purchases. 33 customers share 16 addresses | report only: different ids are different accounts in the purchase files, so never merged |
+| Empty columns | `customer_type` 100% missing | dropped (any fully empty column is) |
+| Labels → codes | every label is "<prefix> <code>: <filler>", one label per code; `#REF!` in postal codes is filler text, not an error | keep the code (`RG17`, `MU14`, …): no information lost |
+| Profile completeness | customers with only 1–2 address fields repurchase less (≈ 0.40 vs ≈ 0.55) | `profile_completeness` = known address fields, counted before recovery |
+| Hierarchy | strict: every island, municipality, postal area and postal code belongs to one region, every region to one country (6 postal areas span two municipalities: reported, never used) | exact recovery: **region 71 of 114 gaps** (from the postal area / code), **municipality 5** |
+| Island | islands exist only in regions RG17 and RG29, and no region has a mix | a blank island elsewhere is **structural → `"none"`** (535); missing only when the region is unknown (43) |
+| Rare levels | 129 of 154 used municipalities have < 5 customers | back-off to the region implemented; **not better** in CV (the target encoder already shrinks small groups) → off |
+| Registration year | 664 customers dated 2015, the first year of the records, vs 13–82 in later years; many first buy years later | `customer_since_before_records` flag; `years_as_customer` computed at each purchase, checked ≥ 0 |
+| Columns kept | — | country, region, island, municipality, `profile_completeness`, the flag, the year. City, postal area / code, street, address and company name are dropped (id-like) |
+
+**Effect on the models** (temporal CV, regression):
+* Codes + exact recovery + island `"none"`: 1.5 RMSE better (4/5 folds).
+* Adding the two new features: another 2.3 RMSE (3/5 folds). In total 3.8 RMSE better than the previous customer table, not decisive.
+* Municipality back-off: 3 RMSE worse → off.
+* Classification still doesn't use customer features: even cleaned, they cost logistic regression 0.007 accuracy.
+
+The main gain is **correctness**: values recovered exactly instead of imputed, and an undefined island no longer treated as unknown. That also changes the reading of the island gap from "MAR, related to the target" to "not an island region".
 
 ### Open items
 
 * Compare the preprocessed models with the week-2 baseline.
 * Leakage demo: show the optimistic gap of fitting the scaler/encoder on all rows instead of per fold.
+* Decide on KNN imputation for the regression: decisively better since the customer-table change (6 RMSE, 5/5 folds); confirm after tuning (§10).
 * Run the hyperparameter tuning for the final models (`<task>.tuning.enabled: true`). It is implemented and tested, but off by default because nested temporal CV with 30 trials takes a while.
 * Once the final models are chosen: score the locked test set once (`test_set.evaluate: true`), then refit on every labelled row for the Kaggle submission (`refit_on_all_rows: true`).
 
@@ -487,6 +522,6 @@ The main metric is accuracy for classification and RMSE for regression (`<task>.
 | Task | Model | Recipe | Validation score | Dummy |
 |---|---|---|---|---|
 | Classification | Logistic regression | original 32 features; median / most frequent; target encoding + standard scaling; `spend_365d` missing indicator | accuracy 0.707 | 0.553 |
-| Regression | Random forest (target in euros) | 32 features + date parts + customer table; median / `"Missing"`; target encoding + min-max scaling; `spend_365d` missing indicator | RMSE 1947 (R² 0.33) | 2472 |
+| Regression | Random forest (target in euros) | 32 features + date parts + cleaned customer table (geography codes, years as customer, profile completeness, "before the records" flag); median / `"Missing"`; target encoding + min-max scaling; `spend_365d` missing indicator | RMSE 1943 (R² 0.33) | 2472 |
 
 The locked test set has not been scored yet. The fitted pipelines are in `models/` after `python main.py`.

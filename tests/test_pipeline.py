@@ -28,6 +28,7 @@ from sklearn.impute import MissingIndicator, SimpleImputer  # noqa: E402
 import yaml  # noqa: E402
 
 from src.cleaning import prepare_table  # noqa: E402
+from src.customers import prepare_customers  # noqa: E402
 from src.data import load_data, report_placeholders, standardize_columns, validate_schema  # noqa: E402
 from src.evaluate import select_scoring, temporal_folds  # noqa: E402
 from src.pipeline import build_pipeline, predict_new_records, prepare_task_data  # noqa: E402
@@ -218,6 +219,25 @@ def test_classification_predictions_match_the_kaggle_sample_submission():
     assert list(written.columns) == list(sample.columns) and written["ID"].tolist() == sample["ID"].tolist()
     assert written["repeat_purchase_90d"].dtype == sample["repeat_purchase_90d"].dtype
     assert set(written["repeat_purchase_90d"].unique()) <= {0, 1}
+
+
+# ---------------------------------------------------------------- customer table
+def test_customer_table_pipeline():
+    cfg = config()
+    clientes = load_data(cfg["data"]["clientes_path"], cfg["diagnostics"]["placeholder_tokens"])
+    table, report = prepare_customers(clientes, cfg["customers"])
+    key = cfg["customers"]["key"]
+    assert len(table) == len(clientes) and table[key].is_unique, "one row per customer"
+    assert list(table.columns) == [key] + cfg["customers"]["columns"]
+    for column in ["country_or_region", "commercial_region", "island", "municipality"]:
+        assert not table[column].dropna().astype(str).str.contains(":").any(), f"{column} still holds labels"
+    island_regions = set(table.loc[~table["island"].isin(["none"]) & table["island"].notna(), "commercial_region"])
+    assert island_regions <= {"RG17", "RG29"}
+    assert (table.loc[table["commercial_region"].notna() & ~table["commercial_region"].isin(island_regions), "island"] == "none").all()
+    recovered = report[report["step"].str.contains("recovered")].groupby("column")["values"].sum()
+    assert recovered["commercial_region"] == 71 and recovered["municipality"] == 5
+    duplicated = pd.concat([clientes, clientes.head(1)])
+    assert "repeated" in expect_error(prepare_customers, duplicated, cfg["customers"])
 
 
 if __name__ == "__main__":

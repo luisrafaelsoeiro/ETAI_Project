@@ -15,6 +15,7 @@ import re
 import numpy as np
 import pandas as pd
 
+from src.customers import prepare_customers
 from src.data import load_data, standardize_columns, standardize_dtypes, validate_schema
 
 
@@ -136,22 +137,31 @@ def add_derived_features(df: pd.DataFrame, features: dict) -> pd.DataFrame:
     return out
 
 
-def add_customer_features(df: pd.DataFrame, clientes: pd.DataFrame, customers_config: dict) -> pd.DataFrame:
+def add_customer_features(df: pd.DataFrame, clientes: pd.DataFrame, customers_config: dict, report: list = None) -> pd.DataFrame:
     """
-    Left-joins the chosen columns of clientes.csv on the customer id. Stateless and
-    row-preserving (same rows, same order): a customer missing from clientes simply gets
-    NaN, which the fitted imputers handle. `derived_features` are computed after the join
-    (e.g. years as a customer at the moment of the purchase).
+    Prepares the customer table (`src/customers.py` -> `prepare_customers`) and left-joins it to
+    the purchases on the customer id. Stateless and row-preserving (same rows, same order): a
+    customer missing from clientes simply gets NaN, which the fitted imputers handle.
+    `derived_features` are computed after the join, at the moment of each purchase (e.g. years
+    as a customer), then checked with `consistency_rules` (e.g. no purchase before the customer
+    existed). Appends the customer report rows to `report` when a list is given.
     """
     if not customers_config.get("use", False):
         return df
     key = customers_config["key"]
-    customers = standardize_columns(clientes, {}).set_index(key)[customers_config["columns"]]
-    out = df.join(customers, on=key)
+    customers, customer_report = prepare_customers(clientes, customers_config)
+    out = df.join(customers.set_index(key), on=key)
+    unknown = out[key].notna() & ~out[key].isin(customers[key])
     out = add_derived_features(out, customers_config.get("derived_features", {}))
+    join_report = apply_consistency_rules(out, customers_config.get("consistency_rules", []))
     out = out.drop(columns=[c for c in customers_config.get("drop_after_derive", []) if c in out.columns])
     if len(out) != len(df) or not out.index.equals(df.index):
         raise AssertionError("add_customer_features must keep every row, in the same order.")
+    if report is not None:
+        report.extend(customer_report.to_dict("records"))
+        report.append({"step": "customers: purchases whose customer is not in clientes.csv", "column": key,
+                       "values": int(unknown.sum()), "rule": ""})
+        report.extend({**r, "step": f"customers: {r['step']}"} for r in join_report.to_dict("records"))
     return out
 
 
@@ -200,8 +210,10 @@ def prepare_table(df: pd.DataFrame, config: dict, clientes: pd.DataFrame = None)
     customers_config = config.get("customers", {})
     if customers_config.get("use", False):
         if clientes is None:
-            clientes = load_data(config["data"]["clientes_path"])
-        out = add_customer_features(out, clientes, customers_config)
+            clientes = load_data(config["data"]["clientes_path"], diagnostics.get("placeholder_tokens"))
+        customer_rows = []
+        out = add_customer_features(out, clientes, customers_config, customer_rows)
+        report = pd.concat([report, pd.DataFrame(customer_rows)], ignore_index=True)
     out = standardize_dtypes(out, config.get("dtypes", {}))
     return out, report
 
