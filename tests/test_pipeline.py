@@ -118,8 +118,15 @@ def test_data_dependent_steps_are_fitted_inside_the_pipeline_on_training_rows_on
     imputer = prep.named_transformers_["numeric"].named_steps["impute"]
     assert isinstance(imputer, RowBoundedImputer) and isinstance(imputer.imputer_, SimpleImputer)
     learned = pd.Series(imputer.imputer_.statistics_, index=numeric_features)
-    assert np.allclose(learned, X_train[numeric_features].median()), "medians must come from the training rows"
-    assert not np.allclose(learned, data["X_dev"][numeric_features].median()), "medians must not see the other rows"
+
+    def medians(rows):   # per column, of the rows its `fit_rows` condition keeps (structural zeros left out)
+        out = rows[numeric_features].median()
+        for column, condition in data["preprocessing_config"]["imputation"].get("fit_rows", {}).items():
+            out[column] = rows.loc[rows.eval(condition), column].median()
+        return out
+
+    assert np.allclose(learned, medians(X_train)), "medians must come from the training rows"
+    assert not np.allclose(learned, medians(data["X_dev"])), "medians must not see the other rows"
 
     scaler = prep.named_transformers_["numeric"].named_steps["scale"]
     encoder = prep.named_transformers_["categorical"].named_steps["encode"]
@@ -193,6 +200,32 @@ def test_row_bounds_only_change_imputed_values():
                         "prior_total_spend": [1000, 100, 1500, np.nan]})
     out = imputer.transform(new)[:, 1]
     assert out.tolist() == [600, 100, 2000, 500], "raised to the 180-day spend, cut to the total, observed kept, NaN limit skipped"
+
+
+def test_column_estimates_and_structural_rows_in_the_imputer():
+    features = ["prior_purchase_count", "purchase_count_365d", "prior_mean_purchase_value", "spend_365d", "prior_max_purchase_value"]
+    train = pd.DataFrame({
+        "prior_purchase_count": [0, 0, 0, 2, 5, 12],
+        "purchase_count_365d": [0, 0, 0, 2, 3, 6],
+        "prior_mean_purchase_value": [0, 0, 0, 100, 200, 300.0],
+        "spend_365d": [0, 0, 0, 210, 590, 1800.0],
+        "prior_max_purchase_value": [0, 0, 0, 120, 400, 900.0],   # 0 on first purchases = "no history"
+    })
+    new = pd.DataFrame({"prior_purchase_count": [4, 8, 30], "purchase_count_365d": [5, 2, np.nan],
+                        "prior_mean_purchase_value": [100, 50, 10.0], "spend_365d": [np.nan, np.nan, np.nan],
+                        "prior_max_purchase_value": [np.nan, 77, np.nan]})
+    formula = {"spend_365d": {"strategy": "formula", "expression": "purchase_count_365d * prior_mean_purchase_value"}}
+    out = pd.DataFrame(RowBoundedImputer(SimpleImputer(strategy="median"), features, column_imputers=formula,
+                                         fit_rows={"prior_max_purchase_value": "prior_purchase_count > 0"})
+                       .fit(train).transform(new), columns=features)
+    assert out["spend_365d"].tolist() == [500, 100, 105], "count x mean per row; a row it can't compute falls back to the median"
+    assert out["prior_max_purchase_value"].tolist() == [400, 77, 400], "median of rows WITH history (not 60 with the zeros); observed kept"
+
+    bands = {"prior_max_purchase_value": {"strategy": "group_median", "by": "prior_purchase_count", "bins": [0, 1, 10, 1000],
+                                          "fit_rows": "prior_purchase_count > 0"}}
+    out = pd.DataFrame(RowBoundedImputer(SimpleImputer(strategy="median"), features, column_imputers=bands)
+                       .fit(train).transform(new), columns=features)
+    assert out["prior_max_purchase_value"].tolist() == [260, 77, 900], "median of the row's purchase-count band"
 
 
 def test_schema_validation_flags_and_repairs():

@@ -136,25 +136,80 @@ def _referenced_names(expression: str) -> set:
     return set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", str(expression)))
 
 
+class _ColumnEstimate:
+    """
+    One column's own estimate, fitted on the training rows (`column_imputers` of
+    RowBoundedImputer). `spec["strategy"]`:
+      - "formula": `expression` evaluated on the row (e.g. 365-day purchase count x mean
+        purchase value). Nothing is learned; a row whose inputs are missing stays NaN;
+      - "iterative": an IterativeImputer restricted to the column and its related `columns`
+        (standardised inside), so the estimate comes from the columns that explain it;
+      - "group_median": the median of the column per band of `by` (`bins`), learned from the
+        observed rows that meet `fit_rows`; a band without training rows uses their overall median.
+    """
+
+    def __init__(self, column, spec):
+        self.column = column
+        self.spec = spec
+
+    def fit(self, X):
+        strategy = self.spec["strategy"]
+        if strategy == "iterative":
+            self.columns_ = [self.column] + [c for c in self.spec["columns"] if c != self.column]
+            self.scaler_ = StandardScaler().fit(X[self.columns_])
+            self.model_ = IterativeImputer(
+                max_iter=self.spec.get("max_iter", 10), random_state=self.spec.get("random_state", 0),
+            ).fit(self.scaler_.transform(X[self.columns_]))
+        elif strategy == "group_median":
+            rows = X[self.column].notna()
+            if self.spec.get("fit_rows"):
+                rows &= X.eval(self.spec["fit_rows"]).astype(bool)
+            bands = pd.cut(X[self.spec["by"]], self.spec["bins"], right=False)
+            self.medians_ = X.loc[rows, self.column].groupby(bands[rows], observed=True).median()
+            self.overall_ = float(X.loc[rows, self.column].median())
+        elif strategy != "formula":
+            raise ValueError(f"Unknown column imputer for {self.column}: {strategy}. "
+                             "Options: formula, iterative, group_median")
+        return self
+
+    def estimate(self, X) -> pd.Series:
+        strategy = self.spec["strategy"]
+        if strategy == "formula":
+            return X.eval(str(self.spec["expression"])).astype("float64")
+        if strategy == "iterative":
+            filled = self.scaler_.inverse_transform(self.model_.transform(self.scaler_.transform(X[self.columns_])))
+            return pd.Series(filled[:, 0], index=X.index)
+        bands = pd.cut(X[self.spec["by"]], self.spec["bins"], right=False)
+        return bands.map(self.medians_).astype("float64").fillna(self.overall_)
+
+
 class RowBoundedImputer(BaseEstimator, TransformerMixin):
     """
-    Fitted step: imputes the numeric columns with `imputer`, then keeps every IMPUTED value
-    within the limits its own row implies (`bounds`, e.g. 365-day spend between the 180-day
-    spend and all prior spend). A single median ignores the rest of the row and can produce
-    impossible values; observed values are never changed.
+    Fitted step for the numeric columns, in three parts (observed values are never changed):
 
-    `bounds`: {column: {"min": expression, "max": expression}}, evaluated on the imputed row
-    with DataFrame.eval; a limit that can't be computed for a row (NaN) is skipped, and `max`
-    wins if the two limits cross. `scaler` (KNN / iterative imputation): impute in scaled space,
-    so large-valued columns don't dominate distances, then return to the original units so the
+      1. `column_imputers` ({column: spec}, see `_ColumnEstimate`): a column with its own
+         estimate from related columns of the same row (e.g. 365-day spend from the 365-day
+         purchase count x the mean purchase value) fills its gaps first;
+      2. `imputer` fills whatever is left. `fit_rows` ({column: condition}): that column's
+         statistic is learned only from the training rows meeting the condition -- e.g.
+         without first purchases, whose 0 is a structural "no history", not a value;
+      3. `bounds` ({column: {"min": expression, "max": expression}}, evaluated on the imputed
+         row with DataFrame.eval): an IMPUTED value is moved to its row's limit when it falls
+         outside (e.g. 365-day spend between the 180-day spend and all prior spend). A limit
+         that can't be computed for a row (NaN) is skipped; `max` wins if the limits cross.
+
+    `scaler` (KNN / iterative imputation): the base imputer works in scaled space, so
+    large-valued columns don't dominate distances, then returns to the original units so the
     limits can be compared -- the pipeline's own scaler follows this step.
     """
 
-    def __init__(self, imputer, feature_names, bounds=None, scaler=None):
+    def __init__(self, imputer, feature_names, bounds=None, scaler=None, column_imputers=None, fit_rows=None):
         self.imputer = imputer
         self.feature_names = feature_names
         self.bounds = bounds
         self.scaler = scaler
+        self.column_imputers = column_imputers
+        self.fit_rows = fit_rows
 
     def _frame(self, X) -> pd.DataFrame:
         frame = pd.DataFrame(X).astype("float64")
@@ -163,18 +218,26 @@ class RowBoundedImputer(BaseEstimator, TransformerMixin):
 
     def fit(self, X, y=None):
         X = self._frame(X)
+        self.estimates_ = [_ColumnEstimate(c, spec).fit(X) for c, spec in (self.column_imputers or {}).items()]
+        base = X.copy()
+        for column, condition in (self.fit_rows or {}).items():
+            base.loc[~X.eval(condition).astype(bool), column] = np.nan  # not learned from these rows
         self.scaler_ = clone(self.scaler).fit(X) if self.scaler is not None else None
-        self.imputer_ = clone(self.imputer).fit(X if self.scaler_ is None else self.scaler_.transform(X))
+        self.imputer_ = clone(self.imputer).fit(base if self.scaler_ is None else self.scaler_.transform(base))
         self.n_features_in_ = X.shape[1]
         return self
 
     def transform(self, X):
         X = self._frame(X)
         missing = X.isna()
-        filled = self.imputer_.transform(X if self.scaler_ is None else self.scaler_.transform(X))
+        partial = X.copy()
+        for estimate in self.estimates_:
+            partial[estimate.column] = partial[estimate.column].fillna(estimate.estimate(X))
+        filled = self.imputer_.transform(partial if self.scaler_ is None else self.scaler_.transform(partial))
         if self.scaler_ is not None:
             filled = self.scaler_.inverse_transform(filled)
-        out = pd.DataFrame(filled, columns=X.columns, index=X.index).where(missing, X)  # observed: exact
+        filled = pd.DataFrame(filled, columns=X.columns, index=X.index)
+        out = partial.fillna(filled).where(missing, X)  # observed: exact
         for column, limits in (self.bounds or {}).items():
             for side in ("min", "max"):
                 if side not in limits:
@@ -192,7 +255,7 @@ class RowBoundedImputer(BaseEstimator, TransformerMixin):
 def _numeric_imputer(imputation: dict):
     strategy = imputation.get("numeric_strategy", "median")
     if strategy == "knn":
-        return KNNImputer(n_neighbors=imputation.get("n_neighbors", 5))
+        return KNNImputer(n_neighbors=imputation.get("n_neighbors", 5), weights=imputation.get("knn_weights", "uniform"))
     if strategy == "iterative":
         return IterativeImputer(max_iter=imputation.get("max_iter", 10), random_state=imputation.get("random_state", 0))
     if strategy == "constant":
@@ -227,11 +290,19 @@ def check_feature_lists(preprocessing_config: dict, available_columns=None) -> N
     orphan = sorted(set(indicator_sources) - set(groups["numeric_features"]) - set(groups["categorical_features"]))
     if orphan:
         problems.append(f"mnar_indicator_sources {orphan} are not numeric or categorical features")
-    for column, limits in preprocessing_config.get("imputation", {}).get("row_bounds", {}).items():
-        names = {column}.union(*(_referenced_names(e) for e in limits.values()))
-        outside = sorted(names - set(groups["numeric_features"]))
-        if outside:
-            problems.append(f"row_bounds of {column} use {outside}, which are not numeric features")
+    imputation = preprocessing_config.get("imputation", {})
+    for setting in ("row_bounds", "column_imputers", "fit_rows"):
+        for column, spec in imputation.get(setting, {}).items():
+            if setting == "row_bounds":
+                expressions = list(spec.values())
+            elif setting == "fit_rows":
+                expressions = [spec]
+            else:
+                expressions = [spec.get("expression", ""), spec.get("by", ""), spec.get("fit_rows", ""), *spec.get("columns", [])]
+            names = {column}.union(*(_referenced_names(e) for e in expressions))
+            outside = sorted(names - set(groups["numeric_features"]))
+            if outside:
+                problems.append(f"{setting} of {column} use {outside}, which are not numeric features")
     if available_columns is not None:
         absent = sorted(set().union(*groups.values()) - set(available_columns))
         if absent:
@@ -268,6 +339,7 @@ def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
         ("impute", RowBoundedImputer(
             _numeric_imputer(imputation), list(numeric_features), imputation.get("row_bounds", {}),
             scaler=clone(scaler) if scale_before_imputing else None,
+            column_imputers=imputation.get("column_imputers", {}), fit_rows=imputation.get("fit_rows", {}),
         )),
         ("scale", scaler),
     ])

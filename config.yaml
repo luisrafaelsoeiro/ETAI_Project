@@ -418,7 +418,20 @@ preprocessing:
   mnar_indicator_sources: [spend_365d]
   imputation:
     numeric_strategy: median          # median | mean | constant | knn | iterative (section 12)
+    # knn only: n_neighbors (default 5) and knn_weights (uniform | distance). KNN is settled:
+    # with a tuned forest no k (3/5/10/20) or weighting is decisive (notebooks/05_imputation.ipynb,
+    # section 8) -> median
     categorical_strategy: most_frequent
+    # the numeric imputer learns these columns only from training rows meeting the condition:
+    # on a first purchase their 0 is the structural "no history" (diagnostics.structural_fill),
+    # not a value, and would pull the median down (notebooks/05_imputation.ipynb, section 6)
+    fit_rows:
+      spend_365d: "prior_purchase_count > 0"
+      prior_max_purchase_value: "prior_purchase_count > 0"
+    # a column with its own estimate from related columns of the same row, applied before the
+    # imputer above (which fills whatever it can't). strategy: formula (`expression`) |
+    # iterative (`columns`) | group_median (`by`, `bins`, `fit_rows`). Each task sets its own
+    column_imputers: {}
     # after imputing, an IMPUTED value is kept within the limits its own row implies
     # (`RowBoundedImputer`; observed values are never changed). Without it the median breaks
     # these rules on 56% of the imputed spend_365d values (notebooks/05_imputation.ipynb)
@@ -455,8 +468,9 @@ classification:
   # better -> keep). Section 11: none of the new features helps -> original features;
   # section 12: median / most frequent
   preprocessing: {encoder: target, scaler: standard}
-  # section 10: validation accuracy 0.707, no train/validation gap; the random forest ties it
-  # (0.0002 ahead, not decisive) and overfits (train 0.85) -> keep
+  # section 10: validation accuracy 0.708, no train/validation gap; the random forest ties it
+  # (0.0005 ahead, SE 0.0035, not decisive) and overfits (train 0.85) -> keep
+  # (current numbers: notebooks/05_imputation.ipynb, section 9)
   # types: dummy | logistic_regression | decision_tree | random_forest | gradient_boosting |
   #        hist_gradient_boosting | xgboost
   model: {type: logistic_regression, params: {max_iter: 2000}}
@@ -508,17 +522,27 @@ regression:
   preprocessing:
     encoder: target
     scaler: minmax
-    # section 11: date parts (41 RMSE, 5/5 folds) and customer features (39 RMSE) lower
+    # section 11: date parts (48 RMSE, 5/5 folds) and customer features (44 RMSE) lower
     # RMSE; the derived ratios add nothing
     # notebooks/04_customer_table.ipynb: + profile completeness and "customer before the records"
     extra_numeric_features: [purchase_month, purchase_weekday, years_as_customer, profile_completeness,
                              customer_since_before_records]
     extra_categorical_features: [country_or_region, commercial_region, island, municipality]
-    # section 12: an explicit "Missing" category: island is 34% missing and the gap is related
-    # to the target (only 0.5 RMSE better than most frequent -- kept, not decisive either way)
-    imputation: {categorical_strategy: constant, categorical_fill_value: Missing}
-  # section 10: lowest validation RMSE (1947); ahead of ridge on 3 of 5 folds (88 RMSE, SE 66:
-  # not decisive). target_transform: none | log1p -- log1p was decisively worse in euros.
+    # section 12: an explicit "Missing" category: the remaining customer gaps are incomplete
+    # profiles related to the target; most frequent is now decisively worse (2.4 RMSE,
+    # notebooks/05_imputation.ipynb, section 7)
+    imputation:
+      categorical_strategy: constant
+      categorical_fill_value: Missing
+      # 365-day spend = 365-day purchase count x mean purchase value: recovers hidden known
+      # values 2.9x closer than the median (MAE 1,217 vs 3,478); the row limits move 7% of its
+      # values vs 61% of the median's; RMSE better on 4 of 5 folds for 3 of 4 forest seeds,
+      # never decisive (notebooks/05_imputation.ipynb, section 6). The classification keeps
+      # the median: there it costs 0.0005-0.001 accuracy, better on 0 of 5 folds
+      column_imputers:
+        spend_365d: {strategy: formula, expression: "purchase_count_365d * prior_mean_purchase_value"}
+  # section 10: lowest validation RMSE (1942, notebooks/05_imputation.ipynb, section 9); ahead
+  # of ridge on 3 of 5 folds (113 RMSE, SE 74: not decisive). target_transform: none | log1p -- log1p was decisively worse in euros.
   # types: dummy | ridge | decision_tree | random_forest | gradient_boosting |
   #        hist_gradient_boosting | xgboost
   model:
