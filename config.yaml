@@ -237,6 +237,13 @@ diagnostics:
     avg_line_value: "net_total / line_item_count"
     spend_share_30d: "spend_30d / (spend_365d + 1)"
     spend_share_90d: "spend_90d / (spend_365d + 1)"
+    tax_rate: "total_tax / net_total"
+    overdue_ratio: "days_since_previous_purchase / prior_mean_gap_days"
+    purchase_rate: "prior_purchase_count / (customer_tenure_days + 1)"
+    count_share_90d: "purchase_count_90d / (purchase_count_365d + 1)"
+    ticket_vs_usual: "net_total / prior_mean_purchase_value"
+    spend_trend: "spend_90d - (spend_180d - spend_90d)"
+    gap_variability: "prior_std_gap_days / prior_mean_gap_days"
 
   # exact sums of other columns (100% of rows): gross_total = net_total + line + global
   # discounts; total_payable = net_total + total_tax
@@ -448,6 +455,7 @@ preprocessing:
   # shared default; each task overrides it with the pair its own comparison chose
   encoder: target                     # onehot | ordinal | count | target
   scaler: robust                      # none | standard | minmax | robust
+  selection: {method: none}
   random_state: 42
 
 # ---------------------------------------------------------------------------------------------

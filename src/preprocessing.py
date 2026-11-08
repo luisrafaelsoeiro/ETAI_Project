@@ -6,17 +6,24 @@ From a cleaned table to a model-ready matrix, shared by both tasks:
   - `build_preprocessor`: the fitted recipe -- imputation, missing indicators, rare-category
     grouping, encoding and scaling in one ColumnTransformer. It lives inside the model's
     Pipeline (src/pipeline.py), so it is fitted on the training rows of every fold only.
+    - `build_selector`: the optional feature-selection step that follows the recipe inside the
+    same Pipeline (`preprocessing.selection` in config.yaml; `none` adds no step)
 
 Feature lists and choices come from config.yaml (`preprocessing` and `<task>.preprocessing`).
 """
 import re
-
+from functools import partial
 import numpy as np
 import pandas as pd
 from sklearn.base import BaseEstimator, TransformerMixin, clone
 from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.experimental import enable_iterative_imputer  # noqa: F401 -- makes IterativeImputer importable
+from sklearn.feature_selection import (
+    SelectFromModel, SelectKBest, VarianceThreshold, mutual_info_classif, mutual_info_regression,
+)
 from sklearn.impute import IterativeImputer, KNNImputer, MissingIndicator, SimpleImputer
+from sklearn.linear_model import Lasso, LogisticRegression
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import (
@@ -362,3 +369,43 @@ def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
         ("indicators", MissingIndicator(features="all"), mnar_indicator_sources),
         ("flags", "passthrough", flag_features),
     ])
+
+SELECTION_METHODS = ("none", "variance", "l1", "forest", "kbest")
+
+
+def build_selector(selection_config: dict, classification: bool, random_state: int = None):
+    """
+    Factory for the feature-selection step (`preprocessing.selection`), or None when
+    the method is "none". It works on the columns the recipe produces (after encoding and
+    scaling) and is meant to sit between the recipe and the model in ONE Pipeline, so what it
+    learns (variances, coefficients, importances, scores) comes from the training rows of
+    each fold only.
+
+    `classification` picks the estimator behind the selector (the task decides: L1 logistic
+    regression vs Lasso, forest classifier vs regressor, mutual information for a class vs for
+    a number). Nothing is fitted here. Raises ValueError on an unknown method.
+    """
+    config = dict(selection_config or {})
+    method = config.get("method", "none")
+    seed = config.get("random_state", random_state)
+    if method not in SELECTION_METHODS:
+        raise ValueError(f"Unknown selection method: {method}. Options: {list(SELECTION_METHODS)}")
+
+    if method == "none":
+        return None
+    if method == "variance":
+        return VarianceThreshold(threshold=config.get("threshold", 0.0))
+    if method == "l1":
+        if classification:
+            estimator = LogisticRegression(penalty="l1", solver="liblinear", C=config.get("C", 0.1),
+                                           max_iter=2000, random_state=seed)
+        else:
+            estimator = Lasso(alpha=config.get("alpha", 10.0), max_iter=20000)
+        return SelectFromModel(estimator, threshold=config.get("threshold", 1e-5))
+    if method == "forest":
+        forest = RandomForestClassifier if classification else RandomForestRegressor
+        estimator = forest(n_estimators=config.get("n_estimators", 200),
+                           min_samples_leaf=config.get("min_samples_leaf", 5), n_jobs=-1, random_state=seed)
+        return SelectFromModel(estimator, threshold=config.get("threshold", "mean"))
+    score = mutual_info_classif if classification else mutual_info_regression
+    return SelectKBest(partial(score, random_state=seed), k=config.get("k", 20))

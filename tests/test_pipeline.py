@@ -4,8 +4,8 @@ Checks of the preprocessing pipeline. Run from the project root:
     python tests/test_pipeline.py        (or: python -m pytest tests, if pytest is installed)
 
 They cover: feature lists (exist, no overlap), missingness indicators inside the pipeline,
-every data-dependent step fitted inside the pipeline on training rows only, the
-stateless/row-preserving cleaning, schema validation, placeholder tokens, saving, loading and
+every data-dependent step fitted inside the pipeline on training rows only, the optional
+feature-selection step, the stateless/row-preserving cleaning, schema validation, placeholder tokens, saving, loading and
 predicting new records with the complete pipeline, Optuna tuning with nested temporal CV,
 and the Kaggle submission format.
 """
@@ -24,19 +24,26 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 from sklearn.exceptions import NotFittedError  # noqa: E402
 from sklearn.impute import MissingIndicator, SimpleImputer  # noqa: E402
+from sklearn.utils.validation import check_is_fitted  # noqa: E402
 
 import yaml  # noqa: E402
 
 from src.cleaning import prepare_table  # noqa: E402
-from src.customers import prepare_customers  # noqa: E402
 from src.data import load_data, report_placeholders, standardize_columns, validate_schema  # noqa: E402
 from src.evaluate import select_scoring, temporal_folds  # noqa: E402
 from src.pipeline import build_pipeline, predict_new_records, prepare_task_data  # noqa: E402
-from src.cleaning import clean_dataset, fill_from_customer_history  # noqa: E402
-from src.preprocessing import RowBoundedImputer, build_preprocessor, check_feature_lists  # noqa: E402
+from src.cleaning import clean_dataset, clean_from_customer_history
+from src.preprocessing import (
+    RowBoundedImputer,
+    SELECTION_METHODS,
+    build_preprocessor,
+    build_selector,
+    check_feature_lists
+)
 from src.results import save_predictions  # noqa: E402
 from src.tasks import TASKS  # noqa: E402
 from src.tuning import nested_cross_validate, tune_pipeline  # noqa: E402
+from src.customers import prepare_customers  # noqa: E402
 
 
 @lru_cache(maxsize=None)
@@ -136,6 +143,40 @@ def test_data_dependent_steps_are_fitted_inside_the_pipeline_on_training_rows_on
     known = set(encoder.categories_[data["preprocessing_config"]["categorical_features"].index("transport_method")])
     assert not (unseen & known), "the encoder must only know categories of the training rows"
 
+
+# ---------------------------------------------------------------- feature selection
+def test_selection_none_adds_no_step_and_unknown_methods_are_rejected():
+    for task in TASKS:
+        recipe = task_data(task)["preprocessing_config"]
+        assert recipe.get("selection", {}).get("method", "none") == "none", "the default must not select"
+        assert list(task_pipeline(task).named_steps) == ["prep", "model"], "method none must add no step"
+    assert "Unknown selection method" in expect_error(build_selector, {"method": "not_a_method"}, True)
+
+
+def test_selection_step_is_fitted_inside_the_pipeline_on_training_rows_only():
+    for task in TASKS:
+        data = task_data(task)
+        half = len(data["X_dev"]) // 2
+        X_train, y_train = data["X_dev"].iloc[:half], data["y_dev"].iloc[:half]
+        for method in [m for m in SELECTION_METHODS if m != "none"]:
+            recipe = {**data["preprocessing_config"], "selection": {"method": method, "k": 10}}
+            pipeline = build_pipeline(recipe, TASKS[task].model.build_model(config()[task]["model"]))
+            assert list(pipeline.named_steps) == ["prep", "select", "model"], f"{task}/{method}: step order"
+            try:
+                check_is_fitted(pipeline.named_steps["select"])
+                raise AssertionError(f"{task}/{method}: the selector must not be fitted before fit")
+            except NotFittedError:
+                pass
+
+            pipeline.fit(X_train, y_train)
+            width = pipeline.named_steps["prep"].transform(X_train).shape[1]
+            support = pipeline.named_steps["select"].get_support()
+            assert len(support) == width and 0 < support.sum() <= width, f"{task}/{method}: bad support"
+            assert len(pipeline[:-1].get_feature_names_out()) == support.sum(), f"{task}/{method}: names"
+            if method == "kbest":
+                assert support.sum() == 10, "kbest must keep exactly k columns"
+            predictions = pipeline.predict(data["X_kaggle"])
+            assert len(predictions) == len(data["X_kaggle"]) and not pd.isna(predictions).any()
 
 # ---------------------------------------------------------------- stateless cleaning + validation
 def test_prepare_table_keeps_every_row_and_is_stateless():

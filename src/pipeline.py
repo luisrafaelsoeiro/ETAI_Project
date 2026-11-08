@@ -14,18 +14,28 @@ from pathlib import Path
 
 import joblib
 import pandas as pd
+from sklearn.base import is_classifier
 from sklearn.pipeline import Pipeline
 
 from src.cleaning import drop_training_rows, fill_from_customer_history, prepare_table
 from src.data import load_data, report_placeholders, validate_customer_ids
-from src.preprocessing import build_preprocessor, check_feature_lists, split_dev_test, task_preprocessing_config
+from src.preprocessing import (
+    build_preprocessor, build_selector, check_feature_lists, split_dev_test, task_preprocessing_config,
+)
 from src.tasks import get_task
 
 
 def build_pipeline(preprocessing_config: dict, model) -> Pipeline:
-    """Preprocessing + model as one estimator: `fit` learns everything from training rows only.
-    Step names address hyperparameters from outside (`model__max_depth`)."""
-    return Pipeline([("prep", build_preprocessor(preprocessing_config)), ("model", model)])
+    """Preprocessing (+ optional feature selection) + model as one estimator: `fit` learns
+    everything from training rows only. Step names address hyperparameters from outside
+    (`model__max_depth`). `preprocessing.selection.method: none` (the default) adds no step,
+    so the pipeline is then exactly `prep` + `model`."""
+    steps = [("prep", build_preprocessor(preprocessing_config))]
+    selector = build_selector(preprocessing_config.get("selection"), is_classifier(model),
+                              preprocessing_config.get("random_state"))
+    if selector is not None:
+        steps.append(("select", selector))
+    return Pipeline(steps + [("model", model)])
 
 
 def prepare_task_data(config: dict, task: str) -> dict:
