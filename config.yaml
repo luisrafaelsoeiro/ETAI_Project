@@ -56,7 +56,8 @@ schema:
     date: [purchase_date]
   # every diagnostics.non_negative_columns entry also gets min 0 automatically
   ranges:
-    purchase_date: {min: "2010-01-01", max: "2030-12-31"}
+    # a purchase can't be in the future (`today` is resolved when the check runs)
+    purchase_date: {min: "2010-01-01", max: today}
     line_item_count: {min: 1}
     invoice_count_current_purchase: {min: 1}
     repeat_purchase_90d: {min: 0, max: 1}
@@ -226,9 +227,14 @@ customers:
     expected_types:
       numeric: [customer_id, customer_since_year]
       integer: [customer_id, customer_since_year]
+    # a registration can't be in the future (`current_year` is resolved when the check runs);
+    # the lower limit only rejects absurd years -- a year before 2015 (the first year of the
+    # records) is still plausible for an old account. Out of range -> NaN here: the year is
+    # impossible, and years_as_customer is then imputed inside the pipeline
     ranges:
       customer_id: {min: 1}
-      customer_since_year: {min: 1990, max: 2030}
+      customer_since_year: {min: 1900, max: current_year}
+    out_of_range_to_nan: true
     allowed_categories:
       country_or_region: 'Country CT\d+: .+'
       commercial_region: 'Region RG\d+: .+'

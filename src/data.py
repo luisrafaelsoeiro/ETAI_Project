@@ -63,6 +63,17 @@ def standardize_columns(df: pd.DataFrame, column_renames: dict) -> pd.DataFrame:
     return out
 
 
+def _resolve_bound(value):
+    """A range limit from config: a number or date, or a keyword resolved when the check runs --
+    `current_year` (e.g. 2026) or `today` (today's date) -- so a limit like "no registration in
+    the future" never goes out of date."""
+    if value == "current_year":
+        return pd.Timestamp.today().year
+    if value == "today":
+        return pd.Timestamp.today().normalize()
+    return value
+
+
 def validate_schema(df: pd.DataFrame, schema_config: dict, non_negative_columns=()):
     """
     Validates a table with standardised column names against config.yaml -> `schema`, and
@@ -71,7 +82,10 @@ def validate_schema(df: pd.DataFrame, schema_config: dict, non_negative_columns=
       - expected data types: numeric columns that are not numeric are coerced (values that
         can't be read as numbers -> NaN, counted); dates that don't parse are counted;
       - valid ranges: values outside [min, max] are counted (`clean_dataset` turns them
-        into NaN). Every non-negative column gets min 0 automatically;
+        into NaN). Every non-negative column gets min 0 automatically. A limit can be the
+        keyword `current_year` or `today`. With `out_of_range_to_nan: true` (used for the
+        customer table, which has no later cleaning step) the values are set to NaN here;
+
       - allowed categories: each categorical column has a pattern for its labels; a label
         that doesn't match is not a category at all -> NaN, counted. Labels that match but
         were never seen in training are fine: the encoders handle them.
@@ -111,18 +125,22 @@ def validate_schema(df: pd.DataFrame, schema_config: dict, non_negative_columns=
         if column not in out.columns:
             continue
         values = out[column]
+        low, high = (_resolve_bound(bounds[k]) if k in bounds else None for k in ("min", "max"))
         if pd.api.types.is_datetime64_any_dtype(values) or column in types.get("date", []):
             values = pd.to_datetime(values, errors="coerce")
-            low, high = (pd.Timestamp(bounds[k]) if k in bounds else None for k in ("min", "max"))
-        else:
-            low, high = bounds.get("min"), bounds.get("max")
+            low, high = (pd.Timestamp(b) if b is not None else None for b in (low, high))
         outside = pd.Series(False, index=values.index)
         if low is not None:
             outside |= values < low
         if high is not None:
             outside |= values > high
-        add("schema: outside valid range", column, outside.fillna(False).sum(),
-            f"[{bounds.get('min', '-inf')}, {bounds.get('max', 'inf')}]")
+        outside = outside.fillna(False).astype(bool)
+        rule = f"[{low if low is not None else '-inf'}, {high if high is not None else 'inf'}]"
+        if schema_config.get("out_of_range_to_nan", False):
+            add("schema: outside valid range -> NaN", column, outside.sum(), rule)
+            out.loc[outside, column] = np.nan
+        else:
+            add("schema: outside valid range", column, outside.sum(), rule)
 
     for column, pattern in schema_config.get("allowed_categories", {}).items():
         if column in out.columns:

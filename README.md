@@ -217,7 +217,7 @@ The blank cells are the real gaps of the data. Their mechanism is analysed in §
 |---|---|---|---|---|
 | required columns | 37 purchase columns; targets and `random_noise` optional | all present | all present | error if one is missing; extra columns reported |
 | expected types | 33 numeric columns, 11 whole-number columns, `purchase_date` a date | 0 problems | 0 problems | text in a numeric column → `NaN` (counted); unparseable dates counted |
-| valid ranges | every non-negative column ≥ 0; `purchase_date` 2010–2030; ≥ 1 line item and invoice; target 0/1; spend ≥ 0 | 63 out of range (the negatives of §2.4) | 8 | counted here, set to `NaN` by `clean_dataset` |
+| valid ranges | every non-negative column ≥ 0; `purchase_date` from 2010 up to **today** (`today` is resolved when the check runs, so a future date is always caught); ≥ 1 line item and invoice; target 0/1; spend ≥ 0 | 63 out of range (the negatives of §2.4) | 8 | counted here, set to `NaN` by `clean_dataset` |
 | allowed categories | each label follows `"<fixed text> <number>"`, e.g. `'Maybe Tomorrow Payment \d+'` | 0 not allowed | 0 not allowed | a label that doesn't match → `NaN` (counted). New but well-formed labels are allowed; the encoders handle them |
 
 After cleaning, `standardize_dtypes()` stores counts and ids as nullable integers (`Int8` / `Int16` / `Int32`), categories as `category`, and keeps monetary values and calculated statistics as `float64` (`config.yaml` → `dtypes`).
@@ -487,7 +487,7 @@ The main metric is accuracy for classification and RMSE for regression (`<task>.
 | Step | Finding | Treatment |
 |---|---|---|
 | Load | blank cells are the only placeholder (3,385) | → `NaN` on load |
-| Validate | all 13 columns present; ids and years whole numbers; years 2015–2026; every label follows its pattern | `validate_schema` with `customers.schema` |
+| Validate | all 13 columns present; ids and years whole numbers; years 2015–2026; every label follows its pattern | `validate_schema` with `customers.schema`. The registration year must lie between 1900 and the **current year** (`current_year` is resolved when the check runs, so the limit never goes out of date). The lower limit only rejects absurd years. An out-of-range year → `NaN` (0 today) |
 | Key | `customer_id` present and unique (1,143) | `check_customer_key` stops the pipeline otherwise (a repeated key would duplicate purchases) |
 | Duplicates | no exact duplicates. 2 company names twice: "Ltd 384" is two accounts at the same address, both with purchases; "Ltd 664" is a probable duplicate profile without purchases. 33 customers share 16 addresses | report only: different ids are different accounts in the purchase files, so never merged |
 | Empty columns | `customer_type` 100% missing | dropped (any fully empty column is) |

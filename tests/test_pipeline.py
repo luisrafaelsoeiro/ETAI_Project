@@ -151,8 +151,11 @@ def test_schema_validation_flags_and_repairs():
     table.loc[table.index[0], "payment_type"] = "Cash!!"            # not an allowed label
     table["cost"] = table["cost"].astype(object)
     table.loc[table.index[1], "cost"] = "twelve"                     # not a number
+    table["purchase_date"] = table["purchase_date"].astype(object)
+    table.loc[table.index[2], "purchase_date"] = str((pd.Timestamp.today() + pd.Timedelta(days=1)).date())  # in the future
     out, report = validate_schema(table, cfg["schema"], cfg["diagnostics"]["non_negative_columns"])
     counts = report.set_index(["step", "column"])["values"]
+    assert counts[("schema: outside valid range", "purchase_date")] == 1, "a future purchase date is out of range"
     assert counts[("schema: label not allowed -> NaN", "payment_type")] == 1 and pd.isna(out["payment_type"].iloc[0])
     assert counts[("schema: non-numeric -> NaN", "cost")] == 1 and pd.api.types.is_numeric_dtype(out["cost"])
     assert "Missing required columns" in expect_error(validate_schema, table.drop(columns=["net_total"]), cfg["schema"])
@@ -238,6 +241,14 @@ def test_customer_table_pipeline():
     assert recovered["commercial_region"] == 71 and recovered["municipality"] == 5
     duplicated = pd.concat([clientes, clientes.head(1)])
     assert "repeated" in expect_error(prepare_customers, duplicated, cfg["customers"])
+    # registration year: future and absurd years -> NaN, the current year is kept
+    this_year = pd.Timestamp.today().year
+    years = clientes.copy()
+    years.loc[years.index[:3], "customer_since_year"] = [this_year + 1, 1850, this_year]
+    since = prepare_customers(years, cfg["customers"])[0]["customer_since_year"]
+    assert pd.isna(since.iloc[0]), "future registration year must become NaN"
+    assert pd.isna(since.iloc[1]), "absurd registration year must become NaN"
+    assert since.iloc[2] == this_year, "the current year is valid"
 
 
 if __name__ == "__main__":
