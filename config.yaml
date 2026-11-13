@@ -481,8 +481,8 @@ classification:
   # nb05 3: validation accuracy 0.708, no train/validation gap; the random forest ties it
   # (0.0005 ahead, SE 0.0035, not decisive) and overfits (train 0.85) -> keep
   # (current numbers: nb05 4)
-  # types: dummy | logistic_regression | decision_tree | random_forest | gradient_boosting |
-  #        hist_gradient_boosting | xgboost
+  # types: dummy | logistic_regression | knn | decision_tree | random_forest | extra_trees |
+  #        gradient_boosting | hist_gradient_boosting | xgboost
   model: {type: logistic_regression, params: {max_iter: 2000}}
   # Optuna + nested temporal CV on the selection metric (`python main.py` runs it when enabled;
   # slow: n_trials x inner_splits fits per outer fold)

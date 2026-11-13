@@ -3,8 +3,11 @@ Classification models (will the customer buy again within 90 days?). Chosen in
 config.yaml -> classification.model, built here.
 """
 from sklearn.dummy import DummyClassifier
-from sklearn.ensemble import GradientBoostingClassifier, HistGradientBoostingClassifier, RandomForestClassifier
+from sklearn.ensemble import (
+    ExtraTreesClassifier, GradientBoostingClassifier, HistGradientBoostingClassifier, RandomForestClassifier,
+)
 from sklearn.linear_model import LogisticRegression
+from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier
 from xgboost import XGBClassifier
 
@@ -12,8 +15,10 @@ _MODELS = {
     # always predicts the most frequent class -- the floor every real model must beat
     "dummy": DummyClassifier,
     "logistic_regression": LogisticRegression,
+    "knn": KNeighborsClassifier,
     "decision_tree": DecisionTreeClassifier,
     "random_forest": RandomForestClassifier,
+    "extra_trees": ExtraTreesClassifier,
     "gradient_boosting": GradientBoostingClassifier,
     "hist_gradient_boosting": HistGradientBoostingClassifier,
     "xgboost": XGBClassifier,

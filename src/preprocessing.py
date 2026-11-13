@@ -265,9 +265,13 @@ def _numeric_imputer(imputation: dict):
         return KNNImputer(n_neighbors=imputation.get("n_neighbors", 5), weights=imputation.get("knn_weights", "uniform"))
     if strategy == "iterative":
         return IterativeImputer(max_iter=imputation.get("max_iter", 10), random_state=imputation.get("random_state", 0))
+    # keep_empty_features: a column with no usable training value (possible on a very small fold,
+    # e.g. the first inner fold of nested CV, once `fit_rows` removes the structural rows) is kept
+    # and filled with 0 instead of being silently dropped, which would break RowBoundedImputer's shape
     if strategy == "constant":
-        return SimpleImputer(strategy="constant", fill_value=imputation.get("numeric_fill_value", 0))
-    return SimpleImputer(strategy=strategy)
+        return SimpleImputer(strategy="constant", fill_value=imputation.get("numeric_fill_value", 0),
+                             keep_empty_features=True)
+    return SimpleImputer(strategy=strategy, keep_empty_features=True)
 
 
 def check_feature_lists(preprocessing_config: dict, available_columns=None) -> None:

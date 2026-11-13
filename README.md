@@ -110,8 +110,10 @@ ETAI_Project/
 │   │                               # fill, row limits, estimates from related columns, imputers, KNN settled
 │   ├── 04_outlier_detection.ipynb  # data errors vs valid extremes, transformations and row removal in temporal CV
 │   ├── 05_preprocessing_and_models.ipynb        # build_preprocessor, encoder x scaler, models, final model scores
-│   └── 06_feature_engineering_selection.ipynb   # data additions, redundancy, relevance, permutation importance,
-│                                   # engineered features, feature selection
+│   ├── 06_feature_engineering_selection.ipynb   # data additions, redundancy, relevance, permutation importance,
+│   │                               # engineered features, feature selection
+│   └── 07_classification_modelling.ipynb        # baselines, 7 tuned models (Optuna + nested CV), metric comparison,
+│                                   # final model, threshold & business value, SHAP / LIME, drivers of return
 │
 ├── src/                            # shared by both tasks
 │   ├── data.py                     # loading, placeholder report, column names, schema and customer_id validation, dtypes
