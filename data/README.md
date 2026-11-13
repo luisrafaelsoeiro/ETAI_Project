@@ -29,4 +29,4 @@ is known at the moment of that purchase.
 The original Portuguese column names (`Total a Pagar`, `Custo`, `N_ Detalhes`, …) are mapped
 in `config.yaml` → `diagnostics.column_renames`. Data-quality findings and every cleaning
 decision are documented in the main README (*Preprocessing Decisions*) and in
-`notebooks/01_preprocessing.ipynb`.
+`notebooks/01_data_cleaning.ipynb` (cleaning), followed by the other notebooks of the workflow.

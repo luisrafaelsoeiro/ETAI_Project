@@ -6,7 +6,7 @@ below is a rule on that static table -- it reads no purchase row and no label --
 the same for training, test.csv and any new record (`prepare_customers`). The cleaned table is
 then joined to the purchases by `src/cleaning.py` -> `add_customer_features`.
 
-Steps, in order (rules in config.yaml -> customers; evidence in notebooks/04_customer_table.ipynb):
+Steps, in order (rules in config.yaml -> customers; evidence in notebooks/02_customer_table.ipynb):
   1. validate: required columns, types, ranges, allowed label patterns (`validate_schema`);
   2. key: customer_id present and unique -- a duplicated key would duplicate purchases on join;
   3. duplicates and near-duplicates: reported (exact rows, company names, shared addresses);

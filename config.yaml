@@ -1,8 +1,10 @@
 # ETAI 2026/27 -- Customer repurchase & spend prediction
 # Every rule and choice of the pipeline, in the order the pipeline uses them. Fitted values
 # (medians, category means, scales) are never stored here: they are learned again from the
-# training rows of every split. The evidence for each choice is in notebooks/ (section numbers
-# refer to notebooks/01_preprocessing.ipynb unless stated otherwise).
+# training rows of every split. The evidence for each choice is in notebooks/, cited as "nb01 5.1"
+# = notebooks/01_data_cleaning.ipynb, section 5.1. The notebooks follow the workflow: 01 data
+# cleaning, 02 customer table, 03 missing values, 04 outliers, 05 preprocessing recipe and
+# models, 06 feature engineering and selection.
 
 # ---------------------------------------------------------------------------------------------
 # 1. DATA
@@ -19,12 +21,12 @@ data:
   target_columns: [repeat_purchase_90d, spend_next_90d]
   # kept row-aligned beside X (split, grouping, submission), never model inputs
   extras_columns: [id, customer_id, purchase_date]
-  # random_noise: pure noise (corr with target -0.012), section 5.1
+  # random_noise: pure noise (corr with target -0.012), nb01 5.1
   drop_columns: [random_noise]
 
 # ---------------------------------------------------------------------------------------------
 # 2. VALIDATION of every purchase table (train.csv, test.csv, new records) before cleaning
-#    (`validate_schema`, first step of `prepare_table`; section 2.10)
+#    (`validate_schema`, first step of `prepare_table`; nb01 2.8)
 # ---------------------------------------------------------------------------------------------
 schema:
   required_columns: [id, customer_id, purchase_date, total_payable, gross_total, net_total,
@@ -72,7 +74,7 @@ schema:
     document_series: 'Ctrl Z Series \d+'
 
 # ---------------------------------------------------------------------------------------------
-# 3. CLEANING RULES -- stateless, row-preserving (`clean_dataset`; sections 2 and 5)
+# 3. CLEANING RULES -- stateless, row-preserving (`clean_dataset`; nb01 2 and 5)
 # ---------------------------------------------------------------------------------------------
 diagnostics:
   date_column: purchase_date
@@ -88,7 +90,7 @@ diagnostics:
     "N_ Detalhes": line_item_count
 
   # text placeholders -> NaN when the file is loaded (load_data). In the raw files the only
-  # one found is the blank cell (section 2.2)
+  # one found is the blank cell (nb01 2.2)
   placeholder_tokens: ["", "-", "--", "?", "N/A", "NA", "n/a", "na", "null", "NULL", "None",
                        "none", "nan", "NaN", "missing", "Missing", "unknown", "Unknown"]
 
@@ -128,7 +130,7 @@ diagnostics:
   placeholder_columns: [prior_mean_purchase_value, spend_365d]
 
   # logical rules between columns of the same row, checked only where every term is
-  # observed (section 5.2). `invalidate`: the value is impossible -> NaN (then recovered by
+  # observed (nb01 5.2). `invalidate`: the value is impossible -> NaN (then recovered by
   # recompute_rules where possible). No `invalidate`: report only.
   consistency_rules:
     - {rule: "abs(gross_total - line_discount_total - global_discount_total - net_total) <= 0.05"}
@@ -153,13 +155,13 @@ diagnostics:
       when: "prior_purchase_count > 0"
       invalidate: prior_mean_purchase_value
     # one previous purchase cannot be larger than the sum of all previous purchases
-    # (notebooks/02_outlier_detection.ipynb): 45 train rows
+    # (notebooks/04_outlier_detection.ipynb): 45 train rows
     - rule: "prior_max_purchase_value <= prior_total_spend + 0.01"
       when: "prior_purchase_count > 0"
       invalidate: prior_max_purchase_value
 
   # NaN -> value implied by an identity between columns of the same row
-  # (each identity holds for >= 99% of the rows where all terms are observed; section 5.1)
+  # (each identity holds for >= 99% of the rows where all terms are observed; nb01 5.1)
   recompute_rules:
     - column: prior_mean_purchase_value
       expression: "prior_total_spend / prior_purchase_count"
@@ -191,7 +193,7 @@ diagnostics:
       expression: "prior_total_spend - prior_max_purchase_value"
       when: "prior_purchase_count == 2"
 
-  # NaN that cannot exist ("not applicable") -> 0, with the flags below marking them (section 5.3)
+  # NaN that cannot exist ("not applicable") -> 0, with the flags below marking them (nb01 5.3)
   structural_fill:
     - when: "prior_purchase_count == 0"      # first purchase: no history at all
       value: 0
@@ -209,7 +211,7 @@ diagnostics:
     has_gap_history: "prior_purchase_count >= 2"
 
   # gaps filled from the SAME customer's earlier purchases (`fill_from_customer_history`,
-  # notebooks/05_imputation.ipynb). Past purchases only, never a later one and never a target.
+  # nb03 7). Past purchases only, never a later one and never a target.
   # It runs after `prepare_table`, on every purchase known at prediction time (train.csv +
   # test.csv); what it can't fill is left to the fitted imputers of the pipeline.
   customer_history:
@@ -226,7 +228,7 @@ diagnostics:
     # rules then run again, so prior_mean_gap_days follows from it
     previous_purchase_gap: days_since_previous_purchase
 
-  # purchase-time features (section 11): only information known at the moment of the
+  # purchase-time features (nb06 1): only information known at the moment of the
   # purchase -- the date itself, and ratios of columns of the same row. All are computed;
   # each task selects the ones its ablation kept (regression: date parts)
   date_features: [month, weekday]
@@ -249,12 +251,12 @@ diagnostics:
   # discounts; total_payable = net_total + total_tax
   redundant_columns: [gross_total, total_payable]
 
-  # training only: rows where everything except these is missing are dropped (section 2.4)
+  # training only: rows where everything except these is missing are dropped (nb01 2.4)
   almost_empty_preserved_columns: [id, customer_id, repeat_purchase_90d]
 
 # Customer table (clientes.csv): master data, one row per customer, prepared by
 # src/customers.py -> prepare_customers and joined by add_customer_features. Every step is a rule
-# on the static table (no purchase row, no label). Evidence: notebooks/04_customer_table.ipynb
+# on the static table (no purchase row, no label). Evidence: notebooks/02_customer_table.ipynb
 customers:
   use: true
   key: customer_id
@@ -363,7 +365,7 @@ dtypes:
     - municipality
 
 # ---------------------------------------------------------------------------------------------
-# 4. VALIDATION DESIGN (section 7)
+# 4. VALIDATION DESIGN (nb01 6-7)
 # ---------------------------------------------------------------------------------------------
 # locked test set: never used to fit, tune, compare or choose anything
 test_set:
@@ -381,7 +383,7 @@ cv:
   gap_days: 90
 
 # ---------------------------------------------------------------------------------------------
-# 5. PREPROCESSING RECIPE -- fitted inside the model Pipeline (`build_preprocessor`; section 8)
+# 5. PREPROCESSING RECIPE -- fitted inside the model Pipeline (`build_preprocessor`; nb05 1)
 # ---------------------------------------------------------------------------------------------
 preprocessing:
   numeric_features:
@@ -419,19 +421,19 @@ preprocessing:
     - warehouse
     - document_series
   flag_features: [is_first_purchase, has_gap_history]
-  # columns whose missingness carries information (section 6); the `indicators` step of the
+  # columns whose missingness carries information (nb03 3); the `indicators` step of the
   # pipeline (MissingIndicator) adds a 0/1 column for each: after the identity fill,
   # spend_365d is only missing for customers with > 365 days of tenure
   mnar_indicator_sources: [spend_365d]
   imputation:
-    numeric_strategy: median          # median | mean | constant | knn | iterative (section 12)
+    numeric_strategy: median          # median | mean | constant | knn | iterative (nb03 4)
     # knn only: n_neighbors (default 5) and knn_weights (uniform | distance). KNN is settled:
-    # with a tuned forest no k (3/5/10/20) or weighting is decisive (notebooks/05_imputation.ipynb,
-    # section 8) -> median
+    # with a tuned forest no k (3/5/10/20) or weighting is decisive (nb03 12)
+    # -> median
     categorical_strategy: most_frequent
     # the numeric imputer learns these columns only from training rows meeting the condition:
     # on a first purchase their 0 is the structural "no history" (diagnostics.structural_fill),
-    # not a value, and would pull the median down (notebooks/05_imputation.ipynb, section 6)
+    # not a value, and would pull the median down (nb03 10)
     fit_rows:
       spend_365d: "prior_purchase_count > 0"
       prior_max_purchase_value: "prior_purchase_count > 0"
@@ -441,7 +443,7 @@ preprocessing:
     column_imputers: {}
     # after imputing, an IMPUTED value is kept within the limits its own row implies
     # (`RowBoundedImputer`; observed values are never changed). Without it the median breaks
-    # these rules on 56% of the imputed spend_365d values (notebooks/05_imputation.ipynb)
+    # these rules on 56% of the imputed spend_365d values (nb03 8)
     row_bounds:
       spend_365d: {min: spend_180d, max: prior_total_spend}
       prior_max_purchase_value:
@@ -450,7 +452,7 @@ preprocessing:
       days_since_previous_purchase: {max: customer_tenure_days}
       prior_mean_gap_days: {max: customer_tenure_days}
   # 0 = off. Grouping categories under N training rows into "rare" was worse for both
-  # tasks (section 11): the target encoder already shrinks rare categories
+  # tasks (nb06 1.2): the target encoder already shrinks rare categories
   rare_category_min_count: 0
   # shared default; each task overrides it with the pair its own comparison chose
   encoder: target                     # onehot | ordinal | count | target
@@ -472,13 +474,13 @@ classification:
     - {type: logistic_regression, params: {max_iter: 2000}}
     - {type: decision_tree, params: {max_depth: 5, random_state: 42}}
     - {type: random_forest, params: {n_estimators: 300, min_samples_leaf: 5, n_jobs: -1, random_state: 42}}
-  # section 9: target + standard, tied with target + minmax / robust (no pair is decisively
-  # better -> keep). Section 11: none of the new features helps -> original features;
-  # section 12: median / most frequent
+  # nb05 2: target + standard, tied with target + minmax / robust (no pair is decisively
+  # better -> keep). nb06 1.2: none of the new features helps -> original features;
+  # nb03 4: median / most frequent
   preprocessing: {encoder: target, scaler: standard}
-  # section 10: validation accuracy 0.708, no train/validation gap; the random forest ties it
+  # nb05 3: validation accuracy 0.708, no train/validation gap; the random forest ties it
   # (0.0005 ahead, SE 0.0035, not decisive) and overfits (train 0.85) -> keep
-  # (current numbers: notebooks/05_imputation.ipynb, section 9)
+  # (current numbers: nb05 4)
   # types: dummy | logistic_regression | decision_tree | random_forest | gradient_boosting |
   #        hist_gradient_boosting | xgboost
   model: {type: logistic_regression, params: {max_iter: 2000}}
@@ -525,31 +527,31 @@ regression:
     - {type: ridge, params: {alpha: 1.0}}
     - {type: decision_tree, params: {max_depth: 5, random_state: 42}}
     - {type: random_forest, params: {n_estimators: 300, min_samples_leaf: 5, n_jobs: -1, random_state: 42}}
-  # section 9: target + minmax ranks first (ordinal + minmax is a tie, and ordinal would
+  # nb05 2: target + minmax ranks first (ordinal + minmax is a tie, and ordinal would
   # impose a meaningless order on unordered categories)
   preprocessing:
     encoder: target
     scaler: minmax
-    # section 11: date parts (48 RMSE, 5/5 folds) and customer features (44 RMSE) lower
+    # nb06 1.2: date parts (48 RMSE, 5/5 folds) and customer features (44 RMSE) lower
     # RMSE; the derived ratios add nothing
-    # notebooks/04_customer_table.ipynb: + profile completeness and "customer before the records"
+    # nb02 12: + profile completeness and "customer before the records"
     extra_numeric_features: [purchase_month, purchase_weekday, years_as_customer, profile_completeness,
                              customer_since_before_records]
     extra_categorical_features: [country_or_region, commercial_region, island, municipality]
-    # section 12: an explicit "Missing" category: the remaining customer gaps are incomplete
+    # nb03 4: an explicit "Missing" category: the remaining customer gaps are incomplete
     # profiles related to the target; most frequent is now decisively worse (2.4 RMSE,
-    # notebooks/05_imputation.ipynb, section 7)
+    # nb03 11)
     imputation:
       categorical_strategy: constant
       categorical_fill_value: Missing
       # 365-day spend = 365-day purchase count x mean purchase value: recovers hidden known
       # values 2.9x closer than the median (MAE 1,217 vs 3,478); the row limits move 7% of its
       # values vs 61% of the median's; RMSE better on 4 of 5 folds for 3 of 4 forest seeds,
-      # never decisive (notebooks/05_imputation.ipynb, section 6). The classification keeps
+      # never decisive (nb03 10). The classification keeps
       # the median: there it costs 0.0005-0.001 accuracy, better on 0 of 5 folds
       column_imputers:
         spend_365d: {strategy: formula, expression: "purchase_count_365d * prior_mean_purchase_value"}
-  # section 10: lowest validation RMSE (1942, notebooks/05_imputation.ipynb, section 9); ahead
+  # nb05 3: lowest validation RMSE (1942, nb05 4); ahead
   # of ridge on 3 of 5 folds (113 RMSE, SE 74: not decisive). target_transform: none | log1p -- log1p was decisively worse in euros.
   # types: dummy | ridge | decision_tree | random_forest | gradient_boosting |
   #        hist_gradient_boosting | xgboost
