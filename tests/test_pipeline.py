@@ -33,7 +33,7 @@ from src.cleaning import prepare_table  # noqa: E402
 from src.data import load_data, report_placeholders, standardize_columns, validate_schema  # noqa: E402
 from src.evaluate import select_scoring, temporal_folds  # noqa: E402
 from src.pipeline import build_pipeline, predict_new_records, prepare_task_data  # noqa: E402
-from src.cleaning import clean_dataset, fill_from_customer_history
+from src.cleaning import apply_consistency_rules, clean_dataset, fill_from_customer_history
 from src.preprocessing import (
     RowBoundedImputer,
     SELECTION_METHODS,
@@ -220,9 +220,15 @@ def test_dropping_a_column_removes_only_the_imputation_settings_that_read_it():
     limits = lambda r, column: r["imputation"]["row_bounds"][column]
 
     out = drop_features(recipe, ["spend_180d"])                     # one side of a limit goes, the other stays
-    assert "min" not in limits(out, "spend_365d") and limits(out, "spend_365d")["max"] == "prior_total_spend"
+    assert limits(out, "spend_365d")["min"] == [
+        "purchase_count_365d * prior_min_purchase_value",
+        "prior_total_spend - (prior_purchase_count - purchase_count_365d) * prior_max_purchase_value"]
+    assert "prior_total_spend" in limits(out, "spend_365d")["max"]
     out = drop_features(recipe, ["prior_total_spend"])              # it is read by two limits
-    assert "max" not in limits(out, "spend_365d") and "max" not in limits(out, "prior_max_purchase_value")
+    assert all("prior_total_spend" not in e for column in ["spend_365d", "prior_max_purchase_value"]
+               for e in limits(out, column)["max"])
+    assert limits(out, "prior_max_purchase_value")["max"] == [
+        "prior_mean_purchase_value + prior_std_purchase_value * sqrt(abs(prior_purchase_count - 1))"]
     assert "min" in limits(out, "prior_max_purchase_value")
     out = drop_features(recipe, ["prior_max_purchase_value"])       # a column's own settings go with it
     assert "prior_max_purchase_value" not in out["imputation"]["row_bounds"]
@@ -268,6 +274,88 @@ def test_exact_recovery_of_prior_max_and_min():
     out, _ = clean_dataset(table, {"recompute_rules": rules})
     assert out["prior_max_purchase_value"].tolist() == [80.0, 50.0, 70.0, 60.0]
     assert out["prior_min_purchase_value"].tolist() == [80.0, 50.0, 30.0, 30.0]
+
+
+def test_maximum_must_agree_with_history_moments():
+    # A genuine history [10, 30, 50] has mean 30 and sample std 20.
+    # 80 is below the total 90, but cannot be its maximum with those moments.
+    table = pd.DataFrame({
+        "prior_purchase_count": [3, 3, 0, 1, 3],
+        "prior_total_spend": [90., 90., 0., 10., 90.],
+        "prior_std_purchase_value": [20., 20., 0., np.nan, np.nan],
+        "prior_max_purchase_value": [50., 80., 0., 10., 80.],
+    })
+    rules = [r for r in config()["diagnostics"]["consistency_rules"] if "sqrt(" in r["rule"]]
+    with np.errstate(invalid="raise"):
+        report = apply_consistency_rules(table, rules)
+    assert table.prior_max_purchase_value.isna().tolist() == [False, True, False, False, False]
+    assert report["rows_checked"].tolist() == [2] and report["values"].tolist() == [1]
+
+
+def test_annual_spend_must_agree_with_window_counts_and_extremes():
+    # History [20, 50, 100], of which 50 is in 180d and 20+50 in 365d.
+    # Annual 160 respects total=170 and count365*max=200, but its additional
+    # purchase would cost 110 > max100. Annual 55 makes it 5 < min20.
+    table = pd.DataFrame({
+        "prior_purchase_count": [3] * 5,
+        "prior_total_spend": [170.] * 5,
+        "prior_min_purchase_value": [20.] * 5,
+        "prior_max_purchase_value": [100.] * 5,
+        "purchase_count_180d": [1] * 5,
+        "spend_180d": [50., 50., 50., 50., np.nan],
+        "purchase_count_365d": [2] * 5,
+        "spend_365d": [70., 160., 55., 70.03, 70.],
+    })
+    rules = [r for r in config()["diagnostics"]["consistency_rules"]
+             if r.get("invalidate") == "spend_365d"]
+    apply_consistency_rules(table, rules)
+    assert table.spend_365d.isna().tolist() == [False, True, True, False, False]
+
+
+def test_additional_real_data_inconsistencies_are_marked_without_dropping_rows():
+    cfg = config()
+    for name, bad_max, bad_spend in [("train", [10003253, 10003727, 10004737], [10005752]),
+                                    ("test", [10007090], [])]:
+        raw = load_data(cfg["data"][f"{name}_path"], cfg["diagnostics"]["placeholder_tokens"])
+        table, _ = prepare_table(raw, cfg)
+        assert table.id.tolist() == raw.ID.tolist()
+        assert table.loc[table.id.isin(bad_max), "prior_max_purchase_value"].isna().all()
+        assert table.loc[table.id.isin(bad_spend), "spend_365d"].isna().all()
+        # Each affected row must get the same result without any other purchase.
+        for identifier, column in [(i, "prior_max_purchase_value") for i in bad_max] + [(i, "spend_365d") for i in bad_spend]:
+            alone, _ = prepare_table(raw[raw.ID.eq(identifier)], cfg)
+            assert len(alone) == 1 and alone[column].isna().all()
+
+
+def test_multiple_row_limits_skip_missing_terms_and_preserve_observed_values():
+    features = ["value", "upper_a", "upper_b", "divisor", "lower"]
+    train = pd.DataFrame([[500., 900., 900., 1., 0.]] * 2, columns=features)
+    bounds = {"value": {"min": "lower", "max": ["upper_a", "upper_b / divisor"]}}
+    imputer = RowBoundedImputer(SimpleImputer(strategy="median"), features, bounds).fit(train)
+    new = pd.DataFrame([[np.nan, 100., 200., 1., 0.], [np.nan, 200., 100., 1., 0.],
+                        [np.nan, 100., 0., 0., 0.], [700., 100., 100., 1., 0.]], columns=features)
+    # The third row's second limit is undefined (0/0); the first still applies.
+    assert imputer.transform(new)[:, 0].tolist() == [100., 100., 100., 700.]
+
+
+def test_imputed_history_respects_the_new_limits_for_both_tasks():
+    for task in TASKS:
+        data = task_data(task)
+        prep = build_preprocessor(data["preprocessing_config"]).fit(data["X_dev"], data["y_dev"])
+        features = data["preprocessing_config"]["numeric_features"]
+        imputer = prep.named_transformers_["numeric"].named_steps["impute"]
+        for rows in [data["X_dev"], data["X_kaggle"]]:
+            filled = pd.DataFrame(imputer.transform(rows[features]), columns=features, index=rows.index)
+            assert np.isfinite(filled.to_numpy()).all()
+            for column, limits in data["preprocessing_config"]["imputation"]["row_bounds"].items():
+                missing = rows[column].isna()
+                assert np.allclose(filled.loc[~missing, column], rows.loc[~missing, column])
+                for side, expressions in limits.items():
+                    for expression in expressions if isinstance(expressions, list) else [expressions]:
+                        bound = filled.eval(str(expression))
+                        checked = missing & bound.notna()
+                        margin = filled[column] - bound
+                        assert ((margin[checked] >= -1e-7) if side == "min" else (margin[checked] <= 1e-7)).all(), (task, column, side, expression)
 
 
 def test_history_fill_uses_the_customers_past_purchases_only():

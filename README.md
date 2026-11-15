@@ -311,34 +311,36 @@ An automatic `SimpleImputer(add_indicator=True)` would flag every column with ga
 #### 2.8 Targets [03 §1; 05 §3]
 
 * **`repeat_purchase_90d`** is complete. It is never imputed, and the pipeline raises an error if a label is missing.
-* **`spend_next_90d`** is missing for 100% of non-repeaters (structural) and for 196 of 3,621 repeaters (5.4%), and those 5.4% are **not missing at random**:
+* **`spend_next_90d`** is missing for 100% of non-repeaters (structural) and for 196 of 3,621 repeat-purchase occasions (5.4%). Availability is associated with time and customer history:
   * They are concentrated at the edges of the data: 16.8% of 2015, 11.6% of 2024 and 49% of 2025 purchases, against 1.3–4.9% in between.
   * They are related to 13 of 32 features: shorter, lower-value histories (median 8.5 vs 17 prior purchases).
+  * All 196 lie at most 90 days before that customer's last visible training purchase (119 customers); only 128 of 3,425 occasions with observed spend lie in that zone. For 176 of the 196, a later purchase is directly visible within 90 days in train [03 §1.1].
 
-  Targets are never imputed. The regressor trains only on repeat purchasers with an observed spend (`regression.row_filter`), and its preprocessing is fitted on those rows only.
+  **[Inference]** Incomplete coverage of the spend horizon is a possible explanation; the extraction process and customer-specific observation ends are unknown. The pattern does not establish MAR versus MNAR or prove a wrong classification label. Similar global date ranges do not rule out customer-relative time patterns. Distance to the last purchase is retrospective, not a model input. Targets are never imputed; a partial sum of visible future purchases does not establish the full 90-day amount. The regressor trains only on repeat purchasers with an observed spend (`regression.row_filter`), and its preprocessing is fitted on those rows only. This update changes the diagnosis, not that filtering rule.
 * **Target transform:** fitting on `log1p(spend)` (skew 2.4 → −0.6) is decisively worse in RMSE for ridge (+733) and the chosen random forest (+385, all 5 folds). A log-scale model predicts close to the median and underestimates large spenders. So the target stays in euros (`target_transform: none`).
 
 ### 3. Inconsistencies [01 §5.2, §8]
 
-17 rules (`diagnostics.consistency_rules`) tie columns of the same row together. Each is checked only where all its terms are observed:
+24 rules (`diagnostics.consistency_rules`) tie columns of the same row together. Each is checked only where all its terms are observed and its optional `when` condition holds. The expression is evaluated only on those rows:
 
 * **Accounting identities.** `gross_total − line_discount_total − global_discount_total = net_total` holds on 100% of rows.
 
   `net_total + total_tax + shipping_cost = total_payable` holds on only 83.7%. This is **not a data error**: `total_payable = net_total + total_tax` holds on 100%, and the rows that "break" are exactly those with a shipping cost. Shipping isn't part of `total_payable`.
 * **Logic.** Counts and spend over 30 ≤ 90 ≤ 180 ≤ 365 days ≤ all prior purchases. Other rules: `prior_min ≤ prior_max`, `days_since_previous_purchase ≤ customer_tenure_days`, at least 1 line item and 1 invoice. **0 violations** for all of these.
-* **Four rules are broken:**
+* **The following consistency groups have violations:**
 
 | Rule | Violations (train / test) | What the values look like | Decision |
 |---|---|---|---|
 | `prior_mean_purchase_value = prior_total_spend / prior_purchase_count` | 46 / 7 | 8–25× too large (median 16×); 45 of 46 above the customer's own maximum | → `NaN`, recomputed exactly from the identity |
 | `spend_365d ≤ prior_total_spend` | 39 / 7 | 1.5–23× too large | → `NaN`, recovered where tenure ≤ 365 days, otherwise median + indicator |
 | `prior_max_purchase_value ≤ prior_total_spend` | 45 / 6 | 1.1–22× too large (median 4×): one purchase can't exceed all purchases together | → `NaN`, median inside the pipeline (rule added after the outlier analysis) |
+| `prior_max ≤ prior_total / n + prior_std × sqrt(n − 1)` (`n ≥ 2`) | 3 / 1 additional | below the historical total, but incompatible with the history's moments | → `NaN`; exact recovery if available, otherwise fitted imputation |
+| annual spend constrained by counts and historical min/max | 1 / 0 additional | ID `10005752`: one purchase between 180 and 365 days would cost €1,419.90, above its historical maximum €466.11 | → `NaN`; exact recovery if available, otherwise fitted imputation |
 | `cost ≤ net_total` | 39 / 5 | sales below cost (median cost = 1.22 × net) | **kept**: unusual but possible, and it contradicts no other column |
 
-The corrupted rows have the same repurchase rate as the others (0.54 / 0.56 / 0.53 vs 0.56). Fixing them costs logistic regression 0.006 accuracy, a decisive drop (all 5 folds), and makes no decisive difference to the regression (4.6 ± 12.7 RMSE, 2 of 5 folds) [11.1]. **We keep the rules** anyway:
-* The corrupted values carry no repurchase information.
-* The loss most likely comes from the inflated values stretching the scale of three columns.
-* A model that depends on impossible values would behave unpredictably on new data.
+The seven additional checks are documented and reproduced in notebook 01 §5.2.1. They detect four further training cells and one test cell using only their own row, without removing purchases. The annual-spend checks cover the 365-day window, the 180-to-365-day difference and the purchases outside the annual window. The existing imputation also respects these bounds: each side accepts one expression or a list, undefined expressions are skipped individually, and feature exclusions remove only the expressions that need an excluded column. The historical maximum is bounded first because annual-spend limits depend on it. Its lower bounds also account for the mean purchase value in those subsets.
+
+**These changes improve internal consistency; a predictive-score improvement is not assumed.** Notebook 01 §8 compares three recipes on the same development folds: current; previous checks and previous imputation bounds; and no consistency cleaning with current bounds. The comparison against the previous recipe isolates this update. Older scores elsewhere in this README and notebooks are results of their recorded configurations and need to be rerun before attributing a change to these checks.
 
 ### 4. Duplicates [01 §2.1, §2.4, §4]
 

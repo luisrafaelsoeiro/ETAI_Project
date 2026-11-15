@@ -159,6 +159,34 @@ diagnostics:
     - rule: "prior_max_purchase_value <= prior_total_spend + 0.01"
       when: "prior_purchase_count > 0"
       invalidate: prior_max_purchase_value
+    # The largest squared deviation cannot exceed the sum of squared deviations:
+    # max <= mean + sample_std * sqrt(n - 1). Use total/count so a corrupted
+    # reported mean does not disable the check. 3 additional train / 1 test cases.
+    - rule: "prior_max_purchase_value <= prior_total_spend / prior_purchase_count + prior_std_purchase_value * sqrt(prior_purchase_count - 1) + 0.05"
+      when: "prior_purchase_count >= 2"
+      invalidate: prior_max_purchase_value
+    # A window (or the difference between windows) is a subset of prior purchases:
+    # its count times the historical min/max bounds its spend. These checks target
+    # spend_365d, the column already diagnosed as corrupted (1 additional train case).
+    # Only use coherent counts; missing terms skip their own rule, not the others.
+    - rule: "spend_365d >= purchase_count_365d * prior_min_purchase_value - 0.05"
+      when: "purchase_count_365d >= 0 and purchase_count_365d <= prior_purchase_count"
+      invalidate: spend_365d
+    - rule: "spend_365d <= purchase_count_365d * prior_max_purchase_value + 0.05"
+      when: "purchase_count_365d >= 0 and purchase_count_365d <= prior_purchase_count"
+      invalidate: spend_365d
+    - rule: "spend_365d >= spend_180d + (purchase_count_365d - purchase_count_180d) * prior_min_purchase_value - 0.05"
+      when: "purchase_count_365d >= purchase_count_180d and purchase_count_365d <= prior_purchase_count"
+      invalidate: spend_365d
+    - rule: "spend_365d <= spend_180d + (purchase_count_365d - purchase_count_180d) * prior_max_purchase_value + 0.05"
+      when: "purchase_count_365d >= purchase_count_180d and purchase_count_365d <= prior_purchase_count"
+      invalidate: spend_365d
+    - rule: "spend_365d >= prior_total_spend - (prior_purchase_count - purchase_count_365d) * prior_max_purchase_value - 0.05"
+      when: "purchase_count_365d >= 0 and purchase_count_365d <= prior_purchase_count"
+      invalidate: spend_365d
+    - rule: "spend_365d <= prior_total_spend - (prior_purchase_count - purchase_count_365d) * prior_min_purchase_value + 0.05"
+      when: "purchase_count_365d >= 0 and purchase_count_365d <= prior_purchase_count"
+      invalidate: spend_365d
 
   # NaN -> value implied by an identity between columns of the same row
   # (each identity holds for >= 99% of the rows where all terms are observed; nb01 5.1)
@@ -445,13 +473,32 @@ preprocessing:
     # iterative (`columns`) | group_median (`by`, `bins`, `fit_rows`). Each task sets its own
     column_imputers: {}
     # after imputing, an IMPUTED value is kept within the limits its own row implies
+    # A side accepts one expression or a list: all available expressions apply.
+    # Bound the maximum first because the annual-spend bounds below read it.
     # (`RowBoundedImputer`; observed values are never changed). Without it the median breaks
     # these rules on 56% of the imputed spend_365d values (nb03 8)
     row_bounds:
-      spend_365d: {min: spend_180d, max: prior_total_spend}
       prior_max_purchase_value:
-        min: prior_mean_purchase_value
-        max: "prior_total_spend - (prior_purchase_count - 1) * prior_min_purchase_value"
+        min:
+          - prior_mean_purchase_value
+          - "spend_365d / purchase_count_365d"
+          - "(spend_365d - spend_180d) / (purchase_count_365d - purchase_count_180d)"
+          - "(prior_total_spend - spend_365d) / (prior_purchase_count - purchase_count_365d)"
+        max:
+          - "prior_total_spend - (prior_purchase_count - 1) * prior_min_purchase_value"
+          # abs avoids sqrt(-1) on structural first-purchase rows (which remain 0).
+          - "prior_mean_purchase_value + prior_std_purchase_value * sqrt(abs(prior_purchase_count - 1))"
+      spend_365d:
+        min:
+          - spend_180d
+          - "purchase_count_365d * prior_min_purchase_value"
+          - "spend_180d + (purchase_count_365d - purchase_count_180d) * prior_min_purchase_value"
+          - "prior_total_spend - (prior_purchase_count - purchase_count_365d) * prior_max_purchase_value"
+        max:
+          - prior_total_spend
+          - "purchase_count_365d * prior_max_purchase_value"
+          - "spend_180d + (purchase_count_365d - purchase_count_180d) * prior_max_purchase_value"
+          - "prior_total_spend - (prior_purchase_count - purchase_count_365d) * prior_min_purchase_value"
       days_since_previous_purchase: {max: customer_tenure_days}
       prior_mean_gap_days: {max: customer_tenure_days}
   # 0 = off. Grouping categories under N training rows into "rare" was worse for both

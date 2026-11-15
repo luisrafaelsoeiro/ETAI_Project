@@ -113,15 +113,24 @@ def drop_features(recipe: dict, names) -> dict:
     A copy of `recipe` without the columns `names`. They leave the numeric, categorical and
     flag lists and the missingness-indicator sources. An imputation setting that reads a
     dropped column goes with it, because it can't use a column the recipe no longer has: a
-    `row_bounds` limit (only that side), a `fit_rows` rule, a `column_imputers` estimate --
+    `row_bounds` expression (other limits on that side stay), a `fit_rows` rule, a `column_imputers` estimate --
     and every setting keyed on a dropped column. Names that are not in the recipe are
     ignored.
     """
     names = set(names)
     reads_dropped = lambda setting: bool(_referenced_names(setting) & names)
     imputation = recipe.get("imputation", {})
-    row_bounds = {column: {side: limit for side, limit in limits.items() if not reads_dropped(limit)}
-                  for column, limits in imputation.get("row_bounds", {}).items() if column not in names}
+    row_bounds = {}
+    for column, limits in imputation.get("row_bounds", {}).items():
+        if column in names:
+            continue
+        kept_limits = {}
+        for side, limit in limits.items():
+            expressions = limit if isinstance(limit, list) else [limit]
+            remaining = [e for e in expressions if not reads_dropped(e)]
+            if remaining:
+                kept_limits[side] = remaining if isinstance(limit, list) else remaining[0]
+        row_bounds[column] = kept_limits
     kept = lambda setting: {column: spec for column, spec in imputation.get(setting, {}).items()
                             if column not in names and not reads_dropped(spec)}
     lists = ["numeric_features", "categorical_features", "flag_features", "mnar_indicator_sources"]
@@ -174,7 +183,10 @@ class RareCategoryGrouper(BaseEstimator, TransformerMixin):
 
 
 def _referenced_names(expression: str) -> set:
-    return set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", str(expression)))
+    text = str(expression)
+    names = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", text))
+    functions = set(re.findall(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(", text))
+    return names - functions
 
 
 class _ColumnEstimate:
@@ -234,10 +246,13 @@ class RowBoundedImputer(BaseEstimator, TransformerMixin):
       2. `imputer` fills whatever is left. `fit_rows` ({column: condition}): that column's
          statistic is learned only from the training rows meeting the condition -- e.g.
          without first purchases, whose 0 is a structural "no history", not a value;
-      3. `bounds` ({column: {"min": expression, "max": expression}}, evaluated on the imputed
+      3. `bounds` ({column: {"min": expression or list, "max": expression or list}}, evaluated on the imputed
          row with DataFrame.eval): an IMPUTED value is moved to its row's limit when it falls
          outside (e.g. 365-day spend between the 180-day spend and all prior spend). A limit
-         that can't be computed for a row (NaN) is skipped; `max` wins if the limits cross.
+         that can't be computed for a row (NaN) is skipped; every available limit applies,
+         so the largest minimum and smallest maximum win. Columns are bounded in config
+         order: bound a historical maximum before a spend limit that depends on it.
+         `max` wins if the limits cross.
 
     `scaler` (KNN / iterative imputation): the base imputer works in scaled space, so
     large-valued columns don't dominate distances, then returns to the original units so the
@@ -283,10 +298,12 @@ class RowBoundedImputer(BaseEstimator, TransformerMixin):
             for side in ("min", "max"):
                 if side not in limits:
                     continue
-                limit = out.eval(str(limits[side]))
-                beyond = out[column] < limit if side == "min" else out[column] > limit
-                beyond &= missing[column] & limit.notna()
-                out.loc[beyond, column] = limit[beyond]
+                expressions = limits[side] if isinstance(limits[side], list) else [limits[side]]
+                for expression in expressions:
+                    limit = out.eval(str(expression))
+                    beyond = out[column] < limit if side == "min" else out[column] > limit
+                    beyond &= missing[column] & limit.notna()
+                    out.loc[beyond, column] = limit[beyond]
         return out.to_numpy()
 
     def get_feature_names_out(self, input_features=None):
@@ -339,7 +356,8 @@ def check_feature_lists(preprocessing_config: dict, available_columns=None) -> N
     for setting in ("row_bounds", "column_imputers", "fit_rows"):
         for column, spec in imputation.get(setting, {}).items():
             if setting == "row_bounds":
-                expressions = list(spec.values())
+                expressions = [e for limit in spec.values()
+                               for e in (limit if isinstance(limit, list) else [limit])]
             elif setting == "fit_rows":
                 expressions = [spec]
             else:

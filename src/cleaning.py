@@ -64,7 +64,10 @@ def apply_consistency_rules(df: pd.DataFrame, rules: list) -> pd.DataFrame:
         checked = df[used].notna().all(axis=1)
         if "when" in rule:
             checked &= df.eval(rule["when"]).fillna(False).astype(bool)
-        violations = checked & ~df.eval(expression).fillna(False).astype(bool)
+        # Evaluate only the rows to which the rule applies: e.g. sqrt(n - 1)
+        # is defined for a purchase history only when n >= 2.
+        violations = pd.Series(False, index=df.index)
+        violations.loc[checked] = ~df.loc[checked].eval(expression).fillna(False).astype(bool)
         column = rule.get("invalidate")
         if column:
             df.loc[violations, column] = np.nan
