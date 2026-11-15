@@ -240,8 +240,9 @@ diagnostics:
 
   # gaps filled from the SAME customer's earlier purchases (`fill_from_customer_history`,
   # nb03 7). Past purchases only, never a later one and never a target.
-  # It runs after `prepare_table`, on every purchase known at prediction time (train.csv +
-  # test.csv); what it can't fill is left to the fitted imputers of the pipeline.
+  # It runs after `prepare_table`, using train.csv as the ONLY cross-row source for
+  # test.csv/new predictions. Prediction rows are never added to history, even if earlier
+  # than another prediction row. What it can't fill is left to the fitted imputers.
   customer_history:
     use: true
     key: customer_id

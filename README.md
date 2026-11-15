@@ -261,11 +261,13 @@ Several history columns are linked by exact definitions. A missing term (origina
 
 In total, 762 values are recovered exactly instead of being guessed by an imputer. The two `prior_max` / `prior_min` identities were added after an audit of the imputation (`notebooks/03_missing_values.ipynb`, section 6).
 
-**From the customer's earlier purchases** (`fill_from_customer_history`, `diagnostics.customer_history`; notebook 03, section 7). Some gaps are best filled from the same customer's other purchases. Only **earlier** purchases are read, never a later one and never a target: the same information a system has when the purchase happens. This step runs after `prepare_table`, on every known purchase (train.csv + test.csv), and leaves what it can't fill to the fitted imputers.
+**From the customer's earlier training purchases** (`fill_from_customer_history`, `diagnostics.customer_history`; notebook 03, section 7). After `prepare_table`, each purchase independently queries an explicit source: prepared **train.csv only**, before task filtering. Only the same customer at a **strictly earlier date** can supply a value; same-day/future purchases are excluded, and no target is read. Prediction rows are never appended to that source, even when one test purchase precedes another. Missing customer/date means no lookup. `predict_new_records(..., history=None)` performs no cross-row fill; the fitted imputers handle remaining gaps. `prepare_task_data()["history"]` supplies the training source for single-record or batch prediction.
+
+This implements the project brief's rule that a test purchase may use only itself, training data and `clientes.csv`. Training-file history preparation still precedes the internal temporal splits; this change concerns independence between test.csv/new prediction rows, not fold-specific history handling. The agreement rates below are pooled descriptive diagnostics; production test filling uses the training source only.
 
 | Column | Filled with | Evidence | Values filled (train / test.csv) |
 |---|---|---|---|
-| `payment_type`, `salesperson`, `transport_method`, `warehouse`, `commercial_zone`, `document_series` | the customer's last observed value before this purchase | on purchases with a known value, the last value is right 97% / 96% / 81% / 99.4% / 99% / 81% of the time, vs 73% / 64% / 17% / 99.7% / 93% / 52% for the most frequent value | 700 / 117 |
+| `payment_type`, `salesperson`, `transport_method`, `warehouse`, `commercial_zone`, `document_series` | the customer's last observed training value before this purchase | on purchases with a known value, the last value is right 97% / 96% / 81% / 99.4% / 99% / 81% of the time, vs 73% / 64% / 17% / 99.7% / 93% / 52% for the most frequent value | 700 / 111 |
 | `days_since_previous_purchase` | date difference to the previous purchase, when it is in the data (its prior purchase count is exactly one lower) | equals the date difference on 100% of 6,669 purchases | 8 / 0, then `prior_mean_gap_days` from its identity (8) |
 
 Together with the new identities, this leaves about a third of the gaps for the fitted imputers: 792 → 249 on the classification development set, 507 → 174 for the regression.
@@ -447,7 +449,7 @@ Every comparison uses these folds, and two options are compared **fold by fold**
 * **Every data-dependent operation is fitted inside the pipeline.** The imputers, missing indicator, rare grouper, target encoder and scaler are fitted on the training rows of each fold. Nothing before the pipeline learns from data; sections 2–5 are rules. A test checks that the medians equal those of the training rows and not of other rows, and that the encoder only knows training categories.
 * **Unseen categories don't crash anything.** Target encoding gives them the overall target mean. The output has no missing values for the development set, the locked test set and test.csv.
 * **Save → load → predict new records** (`src/pipeline.py`). `main.py` saves each fitted pipeline to `models/<task>_pipeline.joblib` (16 KB for classification, ~11 MB for the random-forest regression). It then loads the file back and checks that the loaded copy predicts all 986 test.csv rows identically. `predict_new_records()` also scores a single raw record through the same stateless steps and the loaded pipeline.
-* **Automated checks** (`tests/test_pipeline.py`, 20 tests, all passing):
+* **Automated checks** (`tests/test_pipeline.py`, 28 tests):
   1. feature lists exist and don't overlap;
   2. errors are caught for overlaps, missing names and orphan indicators;
   3. indicators are created inside the pipeline, before imputation;
@@ -467,7 +469,15 @@ Every comparison uses these folds, and two options are compared **fold by fold**
   17. every selector (variance, L1, forest, k-best) is fitted inside the pipeline on training rows only, and the pipeline then predicts new records;
   18. `exclude_features` removes the columns from the shared and per-task lists, a task's own exclusions never reach the other task, and a name that is not in the lists is an error;
   19. dropping a column also removes the imputation settings that read it, never changes its input, and always leaves a valid recipe;
-  20. the exclusions declared in `config.yaml` reach the recipe of each task.
+  20. the exclusions declared in `config.yaml` reach the recipe of each task;
+  21. historical maxima agree with their count, total and sample standard deviation;
+  22. annual-spend window differences agree with counts and historical minimum/maximum;
+  23. the five additional real-data inconsistencies are marked without removing rows;
+  24. multiple row limits skip undefined expressions individually and preserve observed values;
+  25. imputed history respects the configured limits for both tasks;
+  26. query rows never supply history to one another; same-day/future values, missing keys and empty history are handled;
+  27. returned prediction history contains training IDs only;
+  28. raw-record predictions match alone, in subsets, reversed and in the full test batch (including classification probabilities); without supplied history, prediction rows still do not inform each other.
 
 ### 9. Encoder × scaler [05 §2]
 

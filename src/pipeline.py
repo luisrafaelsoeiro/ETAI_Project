@@ -46,6 +46,7 @@ def prepare_task_data(config: dict, task: str) -> dict:
       - X_test / y_test / extras_test: the locked test set;
       - X_kaggle / extras_kaggle / kaggle_raw: test.csv (no target), every row kept;
       - preprocessing_config: the task's recipe (shared section + `<task>.preprocessing`);
+      - history: prepared training purchases only, before history fill/task filtering;
       - clientes: the customer table; reports: placeholder, schema and customer_id reports.
     """
     task_package = get_task(task)
@@ -58,8 +59,9 @@ def prepare_task_data(config: dict, task: str) -> dict:
     kaggle_raw = load_data(data_cfg["test_path"], tokens)
     kaggle, kaggle_report = prepare_table(kaggle_raw, config, clientes)
 
-    # every purchase known at prediction time; each row is filled from its own past only
-    history = pd.concat([train, kaggle], ignore_index=True)
+    # The brief allows only train.csv as cross-row context for a Kaggle purchase.
+    # Keep the unfilled source separate: no prediction row can enter another's history.
+    history = train.copy()
     train, train_history = fill_from_customer_history(train, history, diag_cfg, data_cfg["id_column"])
     kaggle, kaggle_history = fill_from_customer_history(kaggle, history, diag_cfg, data_cfg["id_column"])
     train_report = pd.concat([train_report, train_history], ignore_index=True)
@@ -109,11 +111,11 @@ def load_pipeline(path):
 def predict_new_records(raw_records: pd.DataFrame, config: dict, task: str, pipeline, clientes=None,
                         history: pd.DataFrame = None):
     """Raw purchase rows (as in test.csv) -> predictions: the same stateless steps as
-    training (`prepare_table`), the history fill from the customer's earlier purchases
-    (`history`: the known purchases, e.g. `prepare_task_data(...)["history"]`; without it only
-    the new rows themselves are used), then the fitted pipeline. Nothing is learned from the new rows."""
+    training (`prepare_table`), then history fill from authorised training purchases
+    (`history`: e.g. `prepare_task_data(...)["history"]`), then the fitted pipeline.
+    New rows never supply history to one another. With history=None no cross-row fill is
+    performed; the fitted imputers handle remaining gaps. Nothing is fitted on the new rows."""
     table, _ = prepare_table(raw_records, config, clientes)
-    known = table if history is None else pd.concat([history, table], ignore_index=True)
-    table, _ = fill_from_customer_history(table, known, config["diagnostics"], config["data"]["id_column"])
+    table, _ = fill_from_customer_history(table, history, config["diagnostics"], config["data"]["id_column"])
     X, _, _ = get_task(task).preprocessing.prepare_features(table, config)
     return pipeline.predict(X)

@@ -6,8 +6,8 @@ Cleaning rules shared by both tasks -- the diagnosis of preprocessing.ipynb turn
     fill, flags, date parts, ratios, redundant columns, the customer-table join. They learn
     nothing from the data and keep every row, so they run on train.csv AND test.csv.
   - history rule (`fill_from_customer_history`, run after `prepare_table`): gaps filled from
-    the same customer's earlier purchases. It reads other rows of the same customer -- past
-    ones only -- so it needs the purchase history, but it learns nothing and keeps every row.
+    the same customer's earlier purchases in an explicit training source. Prediction rows
+    never supply history to one another. Nothing is fitted here, and every row is kept.
   - training-data decision (`drop_training_rows`): removes almost-empty rows and duplicates
     from the labelled training file only, before the dev/test split.
 
@@ -176,17 +176,19 @@ def fill_from_customer_history(df: pd.DataFrame, history: pd.DataFrame, diagnost
     """
     Fills gaps from the SAME customer's EARLIER purchases (`diagnostics.customer_history`):
       - `last_observed_columns`: the customer's last observed value before this purchase
-        (customers keep their payment type, salesperson, ... from one purchase to the next);
+        (a carry-forward estimate, not an exact recovery for changing categories);
       - `previous_purchase_gap`: the date difference to the customer's previous purchase, when
         that purchase is in the data and is the immediately previous one (its prior purchase
         count is exactly one lower);
     then `recompute_rules` run again, so values that follow from a filled one (the mean gap
     between purchases) are recovered too.
 
-    Past purchases only, so nothing comes from the future, and no target is read: the same
-    information a prediction-time system has. `history` is every purchase known at prediction
-    time, prepared by `prepare_table` and not yet filled (train.csv + test.csv); `df`'s own rows
-    may be part of it. Rows without a date are neither filled nor used. Row-preserving.
+    `history` is the explicit, authorised source, prepared by `prepare_table` and not yet
+    filled: train.csv only for Kaggle/new predictions. `df` is never added to that source.
+    Training rows can themselves be passed as history when preparing train.csv. Every lookup
+    requires the same customer and a strictly earlier date (not the same day); no target is
+    read. Rows without a customer/date are neither filled nor used. With history=None there
+    is no cross-row fill. Keeps every row and its order, independently of the prediction batch.
     Returns (df, report).
     """
     rules = diagnostics_config.get("customer_history", {})
@@ -198,16 +200,28 @@ def fill_from_customer_history(df: pd.DataFrame, history: pd.DataFrame, diagnost
     gap_column = rules.get("previous_purchase_gap")
     needed = [id_column, key, date, order] + columns + ([gap_column] if gap_column else [])
 
-    pool = pd.concat([history[needed], out[needed]]).drop_duplicates(subset=id_column, keep="last")
-    pool = pool[pool[date].notna()].sort_values([key, date, order], kind="mergesort").reset_index(drop=True)
-    groups = pool.groupby(key, sort=False)
+    pool = out[needed].iloc[:0] if history is None else history[needed]
+    pool = (pool.drop_duplicates(subset=id_column, keep="last").dropna(subset=[key, date])
+            .sort_values([date, key, order], kind="mergesort"))
+    queries = out[[key, date]].copy()
+    queries["_row_position"] = np.arange(len(out))
+    queries = queries.dropna(subset=[key, date]).sort_values(date, kind="mergesort")
+
+    def earlier(rows):
+        """One independent backward lookup per query; query rows never supply values."""
+        if rows.empty or queries.empty:
+            matched = rows.iloc[:0].reindex(range(len(out)))
+        else:
+            matched = pd.merge_asof(queries, rows, on=date, by=key, direction="backward",
+                                    allow_exact_matches=False)
+            matched = matched.set_index("_row_position").reindex(range(len(out)))
+        return matched.set_axis(out.index)
+
     report = []
 
     for column in columns:
-        # last observed value strictly before each purchase: shift one purchase back, then carry forward
-        earlier = groups[column].shift(1).astype(object)
-        last_observed = earlier.groupby(pool[key]).ffill()
-        fill = out[id_column].map(pd.Series(last_observed.to_numpy(), index=pool[id_column]))
+        # Each column may have a different last non-missing value in training history.
+        fill = earlier(pool.loc[pool[column].notna(), [key, date, column]])[column]
         mask = out[column].isna() & fill.notna()
         was_category = isinstance(out[column].dtype, pd.CategoricalDtype)
         values = out[column].astype(object)
@@ -217,9 +231,9 @@ def fill_from_customer_history(df: pd.DataFrame, history: pd.DataFrame, diagnost
                        "values": int(mask.sum()), "rule": "last observed value, past purchases only"})
 
     if gap_column:
-        consecutive = (pool[order] - groups[order].shift(1)) == 1
-        gap = (pool[date] - groups[date].shift(1)).dt.days.where(consecutive)
-        fill = out[id_column].map(pd.Series(gap.to_numpy(), index=pool[id_column]))
+        previous = earlier(pool[[key, date, order]].assign(_previous_date=pool[date]))
+        consecutive = (out[order] - previous[order]) == 1
+        fill = (out[date] - previous["_previous_date"]).dt.days.where(consecutive)
         mask = out[gap_column].isna() & fill.notna()
         out.loc[mask, gap_column] = fill[mask]
         report.append({"step": "filled from the customer's previous purchase date", "column": gap_column,

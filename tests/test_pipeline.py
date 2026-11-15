@@ -384,6 +384,102 @@ def test_history_fill_uses_the_customers_past_purchases_only():
     assert later_only["payment_type"].isna().all(), "a later purchase must never fill an earlier one"
 
 
+def test_history_fill_never_uses_other_query_rows():
+    day = pd.Timestamp("2024-01-01")
+    allowed = pd.DataFrame({
+        "id": [1, 2, 3], "customer_id": [7, 7, 8],
+        "purchase_date": [day, day + pd.Timedelta(days=10), day],
+        "prior_purchase_count": [0, 1, 0], "payment_type": ["A", None, "Other"],
+        "days_since_previous_purchase": [0., 10., 0.],
+    })
+    queries = pd.DataFrame({
+        "id": [4, 5, 6], "customer_id": [7, 7, 9],
+        "purchase_date": [day + pd.Timedelta(days=d) for d in [20, 30, 30]],
+        "prior_purchase_count": [2, 3, 0], "payment_type": ["B", None, None],
+        "days_since_previous_purchase": [np.nan, np.nan, np.nan],
+    }, index=[30, 10, 20])  # preserve the caller's non-sequential index/order
+    diagnostics = {"customer_history": {"use": True, "key": "customer_id",
+                   "date_column": "purchase_date", "order_column": "prior_purchase_count",
+                   "last_observed_columns": ["payment_type"],
+                   "previous_purchase_gap": "days_since_previous_purchase"}}
+    snapshot = allowed.copy(deep=True)
+    batch, _ = fill_from_customer_history(queries, allowed, diagnostics)
+    assert batch.loc[10, "payment_type"] == "A", "earlier query B is not training history"
+    assert pd.isna(batch.loc[10, "days_since_previous_purchase"]), "the immediately prior purchase is a query, not allowed history"
+    assert batch.loc[30, "days_since_previous_purchase"] == 10
+    assert pd.isna(batch.loc[20, "payment_type"]), "a new customer has no authorised past"
+    for position in range(len(queries)):
+        alone, _ = fill_from_customer_history(queries.iloc[[position]], allowed, diagnostics)
+        pd.testing.assert_frame_equal(alone, batch.iloc[[position]])
+    shuffled, _ = fill_from_customer_history(queries.iloc[::-1], allowed, diagnostics)
+    pd.testing.assert_frame_equal(shuffled, batch.iloc[::-1])
+    no_history, _ = fill_from_customer_history(queries, None, diagnostics)
+    assert no_history.loc[[10, 20], "payment_type"].isna().all()
+    assert no_history.days_since_previous_purchase.isna().all()
+    pd.testing.assert_frame_equal(allowed, snapshot)
+
+    # A training value on the exact query date is excluded, including the query's own id.
+    same_day = allowed.iloc[[1]].copy()
+    same_day["payment_type"] = None
+    with_same_day = allowed.copy()
+    with_same_day.loc[1, "payment_type"] = "Same-day value"
+    result, _ = fill_from_customer_history(same_day, with_same_day, diagnostics)
+    assert result.payment_type.iloc[0] == "A"
+    # Missing keys/dates and an empty source do not manufacture a previous purchase.
+    unavailable = queries.copy()
+    unavailable.loc[10, "purchase_date"] = pd.NaT
+    unavailable.loc[20, "customer_id"] = np.nan
+    unavailable["customer_id"] = unavailable["customer_id"].astype("Int64")
+    matching_types = allowed.astype({"customer_id": "Int64"})
+    result, _ = fill_from_customer_history(unavailable, matching_types, diagnostics)
+    assert result.loc[[10, 20], "payment_type"].isna().all()
+    result, _ = fill_from_customer_history(queries, allowed.iloc[:0], diagnostics)
+    pd.testing.assert_frame_equal(result, no_history)
+
+
+def test_prediction_history_contains_training_rows_only():
+    cfg = config()
+    train_ids = set(load_data(cfg["data"]["train_path"])["ID"])
+    for task in TASKS:
+        data = task_data(task)
+        assert set(data["history"].id) == train_ids
+        assert not set(data["history"].id) & set(data["kaggle_raw"].ID)
+
+
+def test_raw_predictions_are_independent_of_batch_context():
+    cfg = config()
+    for task in TASKS:
+        data = task_data(task)
+        model = task_pipeline(task).fit(data["X_dev"], data["y_dev"])
+        raw = data["kaggle_raw"]
+        # Exercise the missing categorical fields for which history is actually used.
+        columns = cfg["diagnostics"]["customer_history"]["last_observed_columns"]
+        missing = raw[columns].isna().any(axis=1)
+        probes = raw.loc[missing].head(12)
+        assert len(probes) == 12
+        positions = raw.index.get_indexer(probes.index)
+        expected = model.predict(data["X_kaggle"].iloc[positions])
+        batch = predict_new_records(probes, cfg, task, model, data["clientes"], data["history"])
+        reversed_batch = predict_new_records(probes.iloc[::-1], cfg, task, model, data["clientes"], data["history"])
+        assert np.allclose(batch, expected) and np.allclose(reversed_batch[::-1], expected)
+        without_history = predict_new_records(probes, cfg, task, model, data["clientes"])
+        for position in range(len(probes)):
+            one = probes.iloc[[position]]
+            assert np.allclose(predict_new_records(one, cfg, task, model, data["clientes"], data["history"]), expected[position])
+            assert np.allclose(predict_new_records(one, cfg, task, model, data["clientes"]), without_history[position])
+        if task == "classification":
+            # Compare probabilities too: equal labels alone can hide different features.
+            class Probabilities:
+                def predict(self, X):
+                    return model.predict_proba(X)
+            probabilities = predict_new_records(probes, cfg, task, Probabilities(), data["clientes"], data["history"])
+            expected_probabilities = model.predict_proba(data["X_kaggle"].iloc[positions])
+            assert np.allclose(probabilities, expected_probabilities)
+            for position in range(len(probes)):
+                alone = predict_new_records(probes.iloc[[position]], cfg, task, Probabilities(), data["clientes"], data["history"])
+                assert np.allclose(alone, probabilities[[position]])
+
+
 def test_row_bounds_only_change_imputed_values():
     features = ["spend_180d", "spend_365d", "prior_total_spend"]
     imputer = RowBoundedImputer(SimpleImputer(strategy="median"), features,
