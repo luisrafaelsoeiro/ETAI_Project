@@ -158,12 +158,23 @@ def compare_preprocessing_variants(variants: dict, model_factory, X, y, folds, s
 
 def paired_comparison(scores_a, scores_b, higher_is_better: bool = True) -> dict:
     """
-    Same folds -> subtract fold by fold. A mean difference more than 2 standard errors
-    from zero is a real edge; within 2 SE it could just be the luck of the folds.
+    Descriptive paired differences, positive when A is better. Overlapping temporal
+    training windows are dependent: no standard error, confidence interval or significance
+    claim is inferred. `consistent_gain` means strictly better on EVERY available fold
+    (at least two); it is a conservative selection heuristic, not a statistical test.
+    Practical relevance and complexity still require judgement.
     """
-    diffs = np.asarray(scores_a) - np.asarray(scores_b)
+    a, b = np.asarray(scores_a, dtype=float), np.asarray(scores_b, dtype=float)
+    if a.ndim != 1 or a.shape != b.shape or len(a) == 0:
+        raise ValueError("Paired scores must be non-empty, one-dimensional and equally sized.")
+    if not (np.isfinite(a).all() and np.isfinite(b).all()):
+        raise ValueError("Paired scores must be finite; inspect failed folds before comparing.")
+    diffs = a - b
     if not higher_is_better:
         diffs = -diffs                      # positive = A is better, for every metric
-    mean, se = diffs.mean(), diffs.std(ddof=1) / np.sqrt(len(diffs))
-    return {"mean_advantage": mean, "se": se, "folds_a_better": int((diffs > 0).sum()),
-            "n_folds": len(diffs), "decisive": bool(abs(mean) > 2 * se)}
+    wins = int((diffs > 0).sum())
+    return {"mean_advantage": float(diffs.mean()),
+            "std_difference": float(diffs.std(ddof=1)) if len(diffs) > 1 else np.nan,
+            "min_advantage": float(diffs.min()), "max_advantage": float(diffs.max()),
+            "folds_a_better": wins, "folds_tied": int((diffs == 0).sum()), "n_folds": len(diffs),
+            "consistent_gain": bool(len(diffs) >= 2 and wins == len(diffs))}

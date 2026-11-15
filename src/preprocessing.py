@@ -37,7 +37,8 @@ def split_features_target(df: pd.DataFrame, data_config: dict, target: str):
     Returns (X, y, extras).
       - y is None when the target column is absent (test.csv) -- nothing needs it.
       - extras keeps id / customer_id / purchase_date row-aligned with X: needed for the
-        temporal split, grouping and the submission file, never as model inputs.
+        temporal split, grouping and the submission file. These columns also accompany X
+        as history lookup context, but the explicit recipe excludes them from model inputs.
       - every target column is removed from X, so neither task can see the other's label.
     Missingness indicators are not added here: the `indicators` step of
     `build_preprocessor` creates them inside the pipeline.
@@ -47,7 +48,9 @@ def split_features_target(df: pd.DataFrame, data_config: dict, target: str):
     extras_cols = [c for c in data_config.get("extras_columns", []) if c in df.columns]
     extras = df[extras_cols].copy()
 
-    always_drop = set(data_config.get("drop_columns", [])) | set(data_config["target_columns"]) | set(extras_cols)
+    # IDs/dates accompany X as lookup context. build_preprocessor's explicit feature
+    # lists exclude them from the model matrix; the history step needs them per fold.
+    always_drop = set(data_config.get("drop_columns", [])) | set(data_config["target_columns"])
     X = df[[c for c in df.columns if c not in always_drop]]
     return X, y, extras
 
@@ -105,6 +108,11 @@ def task_preprocessing_config(config: dict, task: str) -> dict:
         if unknown:
             raise ValueError(f"exclude_features {unknown} are not in the feature lists of the {task} recipe")
         merged = drop_features(merged, excluded)
+    if config["diagnostics"].get("customer_history", {}).get("use", False):
+        if config["test_set"].get("strategy", "temporal") != "temporal":
+            raise ValueError("Fold-local history requires temporal splits; disable history for random-split diagnostics.")
+        merged["customer_history"] = {key: config[key] for key in
+                                      ("data", "diagnostics", "customers", "schema", "dtypes") if key in config}
     return merged
 
 
@@ -338,6 +346,10 @@ def check_feature_lists(preprocessing_config: dict, available_columns=None) -> N
         "flag_features": list(preprocessing_config.get("flag_features", [])),
     }
     problems = []
+    context = set(preprocessing_config.get("customer_history", {}).get("data", {}).get("extras_columns", []))
+    model_context = sorted(context & set().union(*groups.values()))
+    if model_context:
+        problems.append(f"history context columns {model_context} must not be model features")
     for name, features in groups.items():
         repeated = sorted({f for f in features if features.count(f) > 1})
         if repeated:
@@ -383,7 +395,8 @@ def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
     Numeric: `RowBoundedImputer` (impute -- "median" / "mean" / "constant" directly, "knn" /
     "iterative" in scaled space so distances / regressions are not dominated by the
     large-valued columns -- then keep imputed values within their row's limits,
-    `imputation.row_bounds`), then scale. Categorical: impute, group rare categories, encode.
+    `imputation.row_bounds`), optional numeric transform, then scale. All formulas/bounds
+    run in original units. Categorical: impute, group rare categories, encode.
     Indicators: `MissingIndicator` on the raw (not yet imputed) MNAR/MAR columns.
     """
     check_feature_lists(preprocessing_config)
@@ -404,6 +417,9 @@ def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
             scaler=clone(scaler) if scale_before_imputing else None,
             column_imputers=imputation.get("column_imputers", {}), fit_rows=imputation.get("fit_rows", {}),
         )),
+        # Formulas/bounds above must see euros, days and counts in their original units.
+        ("outlier_transform", clone(preprocessing_config["numeric_transform"])
+         if preprocessing_config.get("numeric_transform") is not None else "passthrough"),
         ("scale", scaler),
     ])
 

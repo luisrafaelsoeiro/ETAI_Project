@@ -78,6 +78,77 @@ def expect_error(function, *args):
 
 
 # ---------------------------------------------------------------- feature lists
+def test_history_is_refitted_at_outer_inner_and_holdout_boundaries():
+    from unittest.mock import patch
+    from sklearn.base import clone
+    from src.history import CustomerHistoryFiller
+
+    dates = pd.to_datetime(["2020-01-01", "2020-02-01", "2021-01-01", "2021-02-01",
+                            "2022-01-01", "2022-02-01"])
+    source = pd.DataFrame({"id": range(6), "customer_id": [1] * 6, "purchase_date": dates,
+                           "prior_purchase_count": range(6), "payment_type": ["A", "A", "B", "B", "C", "C"],
+                           "spend_next_90d": [999.] * 6})
+    diagnostics = {"customer_history": {"use": True, "key": "customer_id", "date_column": "purchase_date",
+                                        "order_column": "prior_purchase_count", "last_observed_columns": ["payment_type"]}}
+    cfg = {"data": {"train_path": "mock.csv", "id_column": "id"}, "diagnostics": diagnostics}
+    queries = source.drop(columns="spend_next_90d").iloc[[4, 5]].copy()
+    queries.loc[queries.index[1], "payment_type"] = np.nan
+    outer_train = source.iloc[:2].drop(columns="spend_next_90d")
+    with patch("src.history.load_data", return_value=source), patch("src.history.prepare_table", return_value=(source, None)):
+        outer = CustomerHistoryFiller(cfg).fit(outer_train)
+        assert outer.transform(queries).iloc[1].payment_type == "A", "query C must not fill the later validation query"
+        assert not set(outer.history_.id) & {2, 3, 4, 5}, "embargo and future purchases stay outside the source"
+        later = clone(outer).fit(source.iloc[:4].drop(columns="spend_next_90d"))
+        assert later.transform(queries).iloc[1].payment_type == "B"
+        inner = clone(later).fit(outer_train)
+        assert inner.transform(queries).iloc[1].payment_type == "A", "inner fit must rebuild history, not reuse outer fill"
+        assert "spend_next_90d" not in inner.history_, "target values must not be stored as history"
+        # A raw past purchase excluded by task filtering still belongs to the time-authorised source.
+        sparse_labelled_train = source.iloc[[0, 3]].drop(columns="spend_next_90d")
+        past = CustomerHistoryFiller(cfg).fit(sparse_labelled_train)
+        assert 2 in set(past.history_.id)
+        alone = outer.transform(queries.iloc[[1]])
+        assert alone.payment_type.iloc[0] == outer.transform(queries).payment_type.iloc[1]
+
+
+def test_numeric_transforms_follow_original_unit_imputation_and_fit_only_training():
+    from src.outliers import SkewLog1p, Winsorizer
+    features = ["purchase_count_365d", "prior_mean_purchase_value", "spend_180d", "spend_365d", "prior_total_spend"]
+    train = pd.DataFrame([[2., 20., 30., 40., 100.], [3., 20., 50., 60., 100.],
+                          [4., 20., 60., 80., 100.], [5., 20., 60., 100., 100.]], columns=features)
+    query = pd.DataFrame([[2., 20., 30., np.nan, 100.]], columns=features)
+    recipe = {"numeric_features": features, "categorical_features": [], "scaler": "none", "encoder": "ordinal",
+              "imputation": {"column_imputers": {"spend_365d": {"strategy": "formula", "expression": "purchase_count_365d * prior_mean_purchase_value"}},
+                             "row_bounds": {"spend_365d": {"min": "spend_180d", "max": "prior_total_spend"}}}}
+    log_prep = build_preprocessor({**recipe, "numeric_transform": SkewLog1p(features, minimum_skew=-1)}).fit(train)
+    numeric = log_prep.named_transformers_["numeric"]
+    assert list(numeric.named_steps) == ["impute", "outlier_transform", "scale"]
+    raw_filled = numeric.named_steps["impute"].transform(query)
+    assert raw_filled[0, 3] == 40., "2 purchases x 20 euros must be calculated before logarithms"
+    assert np.isclose(numeric.transform(query)[0, 3], np.log1p(40.))
+    cap_prep = build_preprocessor({**recipe, "numeric_transform": Winsorizer(features, .25, .75)}).fit(train)
+    cap = cap_prep.named_transformers_["numeric"].named_steps["outlier_transform"]
+    assert cap.upper_limits_[3] == 85., "quantiles come from the training fold only"
+    extreme = query.copy()
+    extreme["spend_365d"] = 100000.
+    assert cap_prep.transform(extreme)[0, 3] == 85.
+    assert cap.upper_limits_[3] == 85., "prediction must not relearn quantiles"
+
+
+def test_paired_comparisons_are_descriptive_and_directional():
+    from src.evaluate import paired_comparison
+    mixed = paired_comparison([1., 4., 3.], [2., 2., 2.])
+    assert mixed["folds_a_better"] == 2 and not mixed["consistent_gain"]
+    assert mixed["min_advantage"] == -1 and mixed["max_advantage"] == 2
+    assert "decisive" not in mixed and "se" not in mixed
+    errors = paired_comparison([1., 2.], [2., 3.], higher_is_better=False)
+    assert errors["consistent_gain"] and errors["mean_advantage"] == 1.
+    assert not paired_comparison([1.], [0.])["consistent_gain"]
+    assert paired_comparison([1., 1.], [1., 1.])["folds_tied"] == 2
+    assert "finite" in expect_error(paired_comparison, [np.nan], [1.])
+    assert "equally sized" in expect_error(paired_comparison, [1., 2.], [1.])
+
+
 def test_feature_lists_exist_and_do_not_overlap():
     for task in ["classification", "regression"]:
         data = task_data(task)
@@ -92,6 +163,8 @@ def test_feature_list_errors_are_caught():
     assert "not found" in expect_error(check_feature_lists, absent, task_data("classification")["X_dev"].columns)
     orphan = {**recipe, "mnar_indicator_sources": ["not_a_feature"]}
     assert "mnar_indicator_sources" in expect_error(check_feature_lists, orphan)
+    context = {**recipe, "numeric_features": recipe["numeric_features"] + ["id"]}
+    assert "history context" in expect_error(check_feature_lists, context)
 
 
 # ---------------------------------------------------------------- indicators + fitted steps
@@ -135,8 +208,11 @@ def test_data_dependent_steps_are_fitted_inside_the_pipeline_on_training_rows_on
             out[column] = rows.loc[rows.eval(condition), column].median()
         return out
 
-    assert np.allclose(learned, medians(X_train)), "medians must come from the training rows"
-    assert not np.allclose(learned, medians(data["X_dev"])), "medians must not see the other rows"
+    history_step = pipeline.named_steps["history"]
+    filled_train = history_step.transform(X_train)
+    assert np.allclose(learned, medians(filled_train)), "medians must come from history-filled training rows"
+    assert history_step.cutoff_ == X_train[config()["data"]["date_column"]].max()
+    assert not np.allclose(learned, medians(history_step.transform(data["X_dev"]))), "medians must not see the other rows"
 
     scaler = prep.named_transformers_["numeric"].named_steps["scale"]
     encoder = prep.named_transformers_["categorical"].named_steps["encode"]
@@ -152,7 +228,7 @@ def test_selection_none_adds_no_step_and_unknown_methods_are_rejected():
     for task in TASKS:
         recipe = task_data(task)["preprocessing_config"]
         assert recipe.get("selection", {}).get("method", "none") == "none", "the default must not select"
-        assert list(task_pipeline(task).named_steps) == ["prep", "model"], "method none must add no step"
+        assert list(task_pipeline(task).named_steps) == ["history", "prep", "model"], "method none must add no selector"
     assert "Unknown selection method" in expect_error(build_selector, {"method": "not_a_method"}, True)
 
 
@@ -164,7 +240,7 @@ def test_selection_step_is_fitted_inside_the_pipeline_on_training_rows_only():
         for method in [m for m in SELECTION_METHODS if m != "none"]:
             recipe = {**data["preprocessing_config"], "selection": {"method": method, "k": 10}}
             pipeline = build_pipeline(recipe, TASKS[task].model.build_model(config()[task]["model"]))
-            assert list(pipeline.named_steps) == ["prep", "select", "model"], f"{task}/{method}: step order"
+            assert list(pipeline.named_steps) == ["history", "prep", "select", "model"], f"{task}/{method}: step order"
             try:
                 check_is_fitted(pipeline.named_steps["select"])
                 raise AssertionError(f"{task}/{method}: the selector must not be fitted before fit")
@@ -571,6 +647,8 @@ def test_complete_pipeline_can_be_fitted_saved_loaded_and_predict_new_records():
 
 # ---------------------------------------------------------------- tuning + outputs
 def test_tuning_and_nested_cv_run_on_temporal_folds():
+    from unittest.mock import patch
+    from src.history import CustomerHistoryFiller
     cfg = config()
     data = task_data("classification")
     scoring = select_scoring(TASKS["classification"].evaluate.SCORING, cfg["classification"]["metrics"])
@@ -580,9 +658,24 @@ def test_tuning_and_nested_cv_run_on_temporal_folds():
     best, study = tune_pipeline(classification_pipeline(), data["X_dev"], data["y_dev"], folds,
                                 scoring["accuracy"], space, n_trials=2, random_state=0)
     assert len(study.trials) == 2 and set(study.best_params) == set(space)
-    scores, oof = nested_cross_validate(classification_pipeline(), data["X_dev"], data["y_dev"], dates, folds, 2,
-                                        cfg["cv"]["gap_days"], scoring, "accuracy", space, 2, 0,
-                                        TASKS["classification"].evaluate.predict_for_report)
+    original_fit, seen = CustomerHistoryFiller.fit, set()
+    def record_fit(estimator, X, y=None):
+        fitted = original_fit(estimator, X, y)
+        seen.add((len(X), fitted.cutoff_))
+        assert fitted.history_.purchase_date.le(fitted.cutoff_).all()
+        assert not set(cfg["data"]["target_columns"]) & set(fitted.history_.columns)
+        return fitted
+    with patch.object(CustomerHistoryFiller, "fit", record_fit):
+        scores, oof = nested_cross_validate(classification_pipeline(), data["X_dev"], data["y_dev"], dates, folds, 2,
+                                            cfg["cv"]["gap_days"], scoring, "accuracy", space, 2, 0,
+                                            TASKS["classification"].evaluate.predict_for_report)
+    required = set()
+    for train, _ in folds:
+        outer_dates = dates.iloc[train]
+        required.add((len(train), outer_dates.max()))
+        for inner_train, _ in temporal_folds(outer_dates, 2, cfg["cv"]["gap_days"]):
+            required.add((len(inner_train), outer_dates.iloc[inner_train].max()))
+    assert required <= seen, "actual nested tuning must refit history at every inner/outer training boundary"
     assert len(scores) == len(folds) and {"inner_best", "validation_accuracy"} <= set(scores.columns)
     assert oof.notna().sum() == sum(len(v) for _, v in folds)
 

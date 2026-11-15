@@ -5,6 +5,9 @@
 # = notebooks/01_data_cleaning.ipynb, section 5.1. The notebooks follow the workflow: 01 data
 # cleaning, 02 customer table, 03 missing values, 04 outliers, 05 preprocessing recipe and
 # models, 06 feature engineering and selection.
+# Evaluation correction (2026-11-15): ablation numbers/2SE descriptions in comments
+# below are historical, pending full reruns with fold-local history. They do not
+# establish significance. Current descriptive comparison policy/results: README.md.
 
 # ---------------------------------------------------------------------------------------------
 # 1. DATA
@@ -19,7 +22,7 @@ data:
   group_column: customer_id
   date_column: purchase_date
   target_columns: [repeat_purchase_90d, spend_next_90d]
-  # kept row-aligned beside X (split, grouping, submission), never model inputs
+  # lookup context in X and extras (split, grouping, submission); never model-matrix inputs
   extras_columns: [id, customer_id, purchase_date]
   # random_noise: pure noise (corr with target -0.012), nb01 5.1
   drop_columns: [random_noise]
@@ -240,9 +243,11 @@ diagnostics:
 
   # gaps filled from the SAME customer's earlier purchases (`fill_from_customer_history`,
   # nb03 7). Past purchases only, never a later one and never a target.
-  # It runs after `prepare_table`, using train.csv as the ONLY cross-row source for
-  # test.csv/new predictions. Prediction rows are never added to history, even if earlier
-  # than another prediction row. What it can't fill is left to the fitted imputers.
+  # CustomerHistoryFiller runs INSIDE each fitted pipeline. Source: prepared train.csv
+  # predictors up to that fit's last training date (also for inner CV and holdout).
+  # Embargo/validation/query rows cannot supply values; regression may use earlier
+  # non-returners/unlabelled purchases as predictor-only context. Loaded models retain
+  # the frozen source; query batches never enlarge it. Remaining gaps go to the imputers.
   customer_history:
     use: true
     key: customer_id
