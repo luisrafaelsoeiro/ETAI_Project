@@ -228,9 +228,12 @@ diagnostics:
     # rules then run again, so prior_mean_gap_days follows from it
     previous_purchase_gap: days_since_previous_purchase
 
-  # purchase-time features (nb06 1): only information known at the moment of the
-  # purchase -- the date itself, and ratios of columns of the same row. All are computed;
-  # each task selects the ones its ablation kept (regression: date parts)
+  # purchase-time features (nb06 1, 8): only information known at the moment of the
+  # purchase -- the date itself, and ratios of columns of the same row. All are computed so the
+  # ablations of the notebook can be reproduced; a task uses one only when it lists it in
+  # `extra_numeric_features`. Used: the date parts (regression). Tested and rejected: every ratio,
+  # including tax_rate ... gap_variability (nb06 8: none helps both tasks; in classification
+  # purchase_rate, count_share_90d and gap_variability are decisively worse)
   date_features: [month, weekday]
   derived_features:
     margin: "net_total - cost"
@@ -457,6 +460,20 @@ preprocessing:
   # shared default; each task overrides it with the pair its own comparison chose
   encoder: target                     # onehot | ordinal | count | target
   scaler: robust                      # none | standard | minmax | robust
+  # columns removed from the feature lists of BOTH tasks: no signal (mutual information below the
+  # shuffled-target noise floor, importance ~0; the exploration finds them dominated by one category).
+  # Putting them back does not help regression and gains at most 0.0014 accuracy in classification
+  # (nb06 9.1). Each task adds its own list in `<task>.preprocessing`.
+  # `drop_features` also removes the imputation settings that read a dropped column (none today)
+  exclude_features: [global_discount_total, commercial_zone, warehouse]
+  # optional feature-selection step between the recipe and the model, fitted inside the Pipeline on
+  # the training rows of each fold only (nb06 9: no selector beats the fixed lists above, so none):
+  #   method: none                      -> no step (the Pipeline is exactly recipe + model)
+  #           variance  [threshold]     -> drops columns whose variance is <= threshold (default 0)
+  #           l1        [C | alpha]     -> L1 logistic regression (classification, C) / Lasso (regression, alpha)
+  #           forest    [threshold, n_estimators, min_samples_leaf] -> forest importances ("mean" | "median" | float)
+  #           kbest     [k]             -> the k columns with the highest mutual information with the target
+  # a task can override the whole block in `<task>.preprocessing.selection`
   selection: {method: none}
   random_state: 42
 
@@ -477,7 +494,15 @@ classification:
   # nb05 2: target + standard, tied with target + minmax / robust (no pair is decisively
   # better -> keep). nb06 1.2: none of the new features helps -> original features;
   # nb03 4: median / most frequent
-  preprocessing: {encoder: target, scaler: standard}
+  # nb06 9.1: + 3 more columns without signal; the 6 excluded columns (3 shared) take the model from
+  # 35 to 29 columns with accuracy 0.0019 higher (not decisive, 2/5 folds), so nothing is lost.
+  # `is_first_purchase` stays although it is exactly prior_purchase_count == 0: first purchases are a
+  # segment of their own (exploration 9.3) and a linear or distance-based model cannot build the flag
+  # from the count; to be confirmed on each final model before it is excluded
+  preprocessing:
+    encoder: target
+    scaler: standard
+    exclude_features: [document_series, shipping_cost, invoice_count_current_purchase]
   # nb05 3: validation accuracy 0.708, no train/validation gap; the random forest ties it
   # (0.0005 ahead, SE 0.0035, not decisive) and overfits (train 0.85) -> keep
   # (current numbers: nb05 4)
@@ -538,6 +563,12 @@ regression:
     extra_numeric_features: [purchase_month, purchase_weekday, years_as_customer, profile_completeness,
                              customer_since_before_records]
     extra_categorical_features: [country_or_region, commercial_region, island, municipality]
+    # nb06 9.1: + 3 columns without signal. The 6 excluded columns (3 shared) take the model from 44 to
+    # 38 columns, RMSE 6.2 lower (4/5 folds, SE 2.4: decisive). `has_gap_history`, `line_item_count`,
+    # `profile_completeness`, `document_series`, `purchase_weekday` and `shipping_cost` stay: dropping any of
+    # them as well makes the RMSE 2.8 to 4.2 higher. `has_gap_history` is exactly prior_purchase_count >= 2,
+    # but it tells "no gap history" apart from "short gaps" for models that cannot build it from the count
+    exclude_features: [cost, country_or_region, customer_since_before_records]
     # nb03 4: an explicit "Missing" category: the remaining customer gaps are incomplete
     # profiles related to the target; most frequent is now decisively worse (2.4 RMSE,
     # nb03 11)

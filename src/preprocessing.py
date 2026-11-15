@@ -84,7 +84,11 @@ def task_preprocessing_config(config: dict, task: str) -> dict:
     """The shared `preprocessing` section, overridden by `<task>.preprocessing` (each task
     keeps the encoder/scaler pair, imputation and extra features its own comparisons
     chose). `extra_numeric_features` / `extra_categorical_features` are appended to the
-    shared feature lists; `imputation` keys override the shared ones."""
+    shared feature lists; `imputation` keys override the shared ones. Columns named in
+    `exclude_features` (the shared list plus the task's own) are then removed from every
+    feature list by `drop_features`: the analysis of notebook 06 decided they carry no
+    signal. A name that is not in the task's lists is an error (a typo would silently
+    keep the column)."""
     shared = config["preprocessing"]
     override = dict(config[task].get("preprocessing") or {})
     merged = {**shared, **override}
@@ -93,7 +97,37 @@ def task_preprocessing_config(config: dict, task: str) -> dict:
     merged["imputation"] = {**shared.get("imputation", {}), **override.get("imputation", {})}
     merged.pop("extra_numeric_features", None)
     merged.pop("extra_categorical_features", None)
+    excluded = list(dict.fromkeys(list(shared.get("exclude_features", [])) + list(override.get("exclude_features", []))))
+    merged.pop("exclude_features", None)
+    if excluded:
+        listed = set(merged["numeric_features"]) | set(merged["categorical_features"]) | set(merged.get("flag_features", []))
+        unknown = sorted(set(excluded) - listed)
+        if unknown:
+            raise ValueError(f"exclude_features {unknown} are not in the feature lists of the {task} recipe")
+        merged = drop_features(merged, excluded)
     return merged
+
+
+def drop_features(recipe: dict, names) -> dict:
+    """
+    A copy of `recipe` without the columns `names`. They leave the numeric, categorical and
+    flag lists and the missingness-indicator sources. An imputation setting that reads a
+    dropped column goes with it, because it can't use a column the recipe no longer has: a
+    `row_bounds` limit (only that side), a `fit_rows` rule, a `column_imputers` estimate --
+    and every setting keyed on a dropped column. Names that are not in the recipe are
+    ignored.
+    """
+    names = set(names)
+    reads_dropped = lambda setting: bool(_referenced_names(setting) & names)
+    imputation = recipe.get("imputation", {})
+    row_bounds = {column: {side: limit for side, limit in limits.items() if not reads_dropped(limit)}
+                  for column, limits in imputation.get("row_bounds", {}).items() if column not in names}
+    kept = lambda setting: {column: spec for column, spec in imputation.get(setting, {}).items()
+                            if column not in names and not reads_dropped(spec)}
+    lists = ["numeric_features", "categorical_features", "flag_features", "mnar_indicator_sources"]
+    return {**recipe, **{key: [c for c in recipe.get(key, []) if c not in names] for key in lists},
+            "imputation": {**imputation, "row_bounds": {c: limits for c, limits in row_bounds.items() if limits},
+                           "fit_rows": kept("fit_rows"), "column_imputers": kept("column_imputers")}}
 
 
 _SCALERS = {"none": "passthrough", "standard": StandardScaler, "minmax": MinMaxScaler, "robust": RobustScaler}

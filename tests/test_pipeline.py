@@ -5,10 +5,11 @@ Checks of the preprocessing pipeline. Run from the project root:
 
 They cover: feature lists (exist, no overlap), missingness indicators inside the pipeline,
 every data-dependent step fitted inside the pipeline on training rows only, the optional
-feature-selection step, the stateless/row-preserving cleaning, schema validation, placeholder tokens, saving, loading and
+feature-selection step, the excluded features, the stateless/row-preserving cleaning, schema validation, placeholder tokens, saving, loading and
 predicting new records with the complete pipeline, Optuna tuning with nested temporal CV,
 and the Kaggle submission format.
 """
+import copy
 import os
 import sys
 import tempfile
@@ -32,13 +33,15 @@ from src.cleaning import prepare_table  # noqa: E402
 from src.data import load_data, report_placeholders, standardize_columns, validate_schema  # noqa: E402
 from src.evaluate import select_scoring, temporal_folds  # noqa: E402
 from src.pipeline import build_pipeline, predict_new_records, prepare_task_data  # noqa: E402
-from src.cleaning import clean_dataset, clean_from_customer_history
+from src.cleaning import clean_dataset, fill_from_customer_history
 from src.preprocessing import (
     RowBoundedImputer,
     SELECTION_METHODS,
     build_preprocessor,
     build_selector,
-    check_feature_lists
+    check_feature_lists,
+    drop_features,
+    task_preprocessing_config,
 )
 from src.results import save_predictions  # noqa: E402
 from src.tasks import TASKS  # noqa: E402
@@ -177,6 +180,70 @@ def test_selection_step_is_fitted_inside_the_pipeline_on_training_rows_only():
                 assert support.sum() == 10, "kbest must keep exactly k columns"
             predictions = pipeline.predict(data["X_kaggle"])
             assert len(predictions) == len(data["X_kaggle"]) and not pd.isna(predictions).any()
+
+# ---------------------------------------------------------------- excluded features
+def config_without_exclusions():
+    """config.yaml as if no column were excluded (the real exclusions are tested by the pipeline tests)."""
+    plain = copy.deepcopy(config())
+    plain["preprocessing"].pop("exclude_features", None)
+    for task in TASKS:
+        plain[task]["preprocessing"].pop("exclude_features", None)
+    return plain
+
+
+def test_exclude_features_removes_columns_shared_and_per_task():
+    plain = config_without_exclusions()
+    cfg = copy.deepcopy(plain)
+    cfg["preprocessing"]["exclude_features"] = ["warehouse", "shipping_cost"]
+    cfg["classification"]["preprocessing"]["exclude_features"] = ["is_first_purchase"]
+    cfg["regression"]["preprocessing"]["exclude_features"] = ["cost"]
+    own = {"classification": "is_first_purchase", "regression": "cost"}
+    for task in TASKS:
+        base, recipe = task_preprocessing_config(plain, task), task_preprocessing_config(cfg, task)
+        gone = {"warehouse", "shipping_cost", own[task]}
+        for key in ["numeric_features", "categorical_features", "flag_features"]:
+            assert recipe[key] == [c for c in base[key] if c not in gone], f"{task}/{key}: only the excluded go"
+        assert "exclude_features" not in recipe, "the key is consumed, not passed on"
+        check_feature_lists(recipe, task_data(task)["X_dev"].columns)
+        build_preprocessor(recipe)
+    # a task's own exclusions never reach the other task
+    assert "cost" in task_preprocessing_config(cfg, "classification")["numeric_features"]
+    assert "is_first_purchase" in task_preprocessing_config(cfg, "regression")["flag_features"]
+    bad = copy.deepcopy(plain)
+    bad["classification"]["preprocessing"]["exclude_features"] = ["not_a_column"]
+    assert "exclude_features" in expect_error(task_preprocessing_config, bad, "classification")
+
+
+def test_dropping_a_column_removes_only_the_imputation_settings_that_read_it():
+    recipe = task_preprocessing_config(config_without_exclusions(), "regression")
+    before = copy.deepcopy(recipe)
+    limits = lambda r, column: r["imputation"]["row_bounds"][column]
+
+    out = drop_features(recipe, ["spend_180d"])                     # one side of a limit goes, the other stays
+    assert "min" not in limits(out, "spend_365d") and limits(out, "spend_365d")["max"] == "prior_total_spend"
+    out = drop_features(recipe, ["prior_total_spend"])              # it is read by two limits
+    assert "max" not in limits(out, "spend_365d") and "max" not in limits(out, "prior_max_purchase_value")
+    assert "min" in limits(out, "prior_max_purchase_value")
+    out = drop_features(recipe, ["prior_max_purchase_value"])       # a column's own settings go with it
+    assert "prior_max_purchase_value" not in out["imputation"]["row_bounds"]
+    assert "prior_max_purchase_value" not in out["imputation"]["fit_rows"]
+    out = drop_features(recipe, ["prior_mean_purchase_value"])      # read by the spend_365d estimate
+    assert "spend_365d" not in out["imputation"]["column_imputers"]
+    for dropped in (["spend_180d"], ["prior_total_spend"], ["prior_max_purchase_value"], ["prior_mean_purchase_value"]):
+        check_feature_lists(drop_features(recipe, dropped))         # the result is always a valid recipe
+    assert recipe == before, "drop_features must not change its input"
+    assert drop_features(recipe, ["not_a_column"]) == recipe, "unknown names are ignored"
+
+
+def test_config_exclusions_reach_the_recipe_of_each_task():
+    shared = set(config()["preprocessing"].get("exclude_features", []))
+    for task in TASKS:
+        declared = shared | set((config()[task].get("preprocessing") or {}).get("exclude_features", []))
+        recipe = task_data(task)["preprocessing_config"]
+        listed = set(recipe["numeric_features"] + recipe["categorical_features"] + list(recipe.get("flag_features", [])))
+        assert declared and not declared & listed, f"{task}: excluded columns still in the recipe: {sorted(declared & listed)}"
+        assert declared <= set(task_data(task)["X_dev"].columns), f"{task}: an excluded column does not exist in the data"
+
 
 # ---------------------------------------------------------------- stateless cleaning + validation
 def test_prepare_table_keeps_every_row_and_is_stateless():
