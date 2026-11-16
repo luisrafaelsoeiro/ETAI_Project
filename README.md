@@ -4,6 +4,8 @@
 >
 > Refreshed configured-model CV (5 temporal folds, 90-day gap): classification accuracy **0.709505 ± 0.016838 SD**; regression RMSE **1937.329331 ± 160.594639 SD**. Both CLI runs saved/reloaded their models and produced all **986** test predictions. No holdout score was inspected in this correction run.
 
+> **Controlled experiments — 2026-11-16:** purchase-category history × mode/Missing, plus legacy versus tax-inclusive `ticket_vs_usual`, were tested on the five development folds. Regression repeats three forest seeds. No alternative improved on every fold; current category policies and feature lists remain unchanged. The candidate ratio now uses a coherent tax-inclusive definition but stays outside both models. See [results, reconstruction checks and replay commands](docs/preprocessing_experiments.md) (notebook 03 §15 and notebook 06 §12).
+
 ## Project Overview
 
 This project was developed as part of the **ETAI 2026/27 Group Project**.
@@ -451,7 +453,7 @@ See [scikit-learn's discussion of dependent CV scores](https://scikit-learn.org/
 * **Every data-dependent operation is fitted inside the pipeline.** The imputers, missing indicator, rare grouper, target encoder and scaler are fitted on the training rows of each fold. Nothing before the pipeline learns from data; sections 2–5 are rules. A test checks that the medians equal those of the history-filled training rows and not of other rows, and that the encoder only knows training categories.
 * **Unseen categories don't crash anything.** Target encoding gives them the overall target mean. The output has no missing values for the development set, the locked test set and test.csv.
 * **Save → load → predict new records** (`src/pipeline.py`). `main.py` saves each fitted pipeline to `models/<task>_pipeline.joblib` (including the fitted history source). It then loads the file back and checks that the loaded copy predicts all 986 test.csv rows identically. `predict_new_records()` also scores a single raw record through the same stateless steps and the loaded pipeline.
-* **Automated checks** (`tests/test_pipeline.py`, 31 tests):
+* **Automated checks** (`tests/test_pipeline.py`, 34 tests):
   1. feature lists exist and don't overlap;
   2. errors are caught for overlaps, missing names and orphan indicators;
   3. indicators are created inside the pipeline, before imputation;
@@ -482,7 +484,10 @@ See [scikit-learn's discussion of dependent CV scores](https://scikit-learn.org/
   28. raw-record predictions match alone, in subsets, reversed and in the full test batch (including classification probabilities); the fitted source is used with or without the deprecated external history argument.
   29. each fit freezes its own history at the outer/inner/holdout training boundary, without targets or validation-query feedback;
   30. formulas/bounds precede numeric transforms, and winsorisation quantiles are learned from training only;
-  31. paired comparisons report descriptive directional differences, handle ties, and reject non-finite/mismatched scores.
+  31. paired comparisons report descriptive directional differences, handle ties, and reject non-finite/mismatched scores;
+  32. purchase-category imputation overrides preserve customer-profile policy, output order and unseen categories;
+  33. experimental history variants are independent copies and keep date-gap recovery/profile imputation unchanged;
+  34. the candidate ticket ratio uses tax-inclusive amounts, handles zero history, and stays outside the current feature lists.
 
 ### 9. Encoder × scaler [05 §2]
 

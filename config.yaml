@@ -280,7 +280,10 @@ diagnostics:
     overdue_ratio: "days_since_previous_purchase / prior_mean_gap_days"
     purchase_rate: "prior_purchase_count / (customer_tenure_days + 1)"
     count_share_90d: "purchase_count_90d / (purchase_count_365d + 1)"
-    ticket_vs_usual: "net_total / prior_mean_purchase_value"
+    # Historical spend increments match prior total_payable (net + tax), not net_total.
+    # Use the same tax-inclusive basis for current and historical purchase values.
+    # Candidate only; the feature lists still decide whether the model receives it.
+    ticket_vs_usual: "(net_total + total_tax) / prior_mean_purchase_value"
     spend_trend: "spend_90d - (spend_180d - spend_90d)"
     gap_variability: "prior_std_gap_days / prior_mean_gap_days"
 

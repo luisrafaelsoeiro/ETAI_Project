@@ -122,7 +122,7 @@ def drop_features(recipe: dict, names) -> dict:
     flag lists and the missingness-indicator sources. An imputation setting that reads a
     dropped column goes with it, because it can't use a column the recipe no longer has: a
     `row_bounds` expression (other limits on that side stay), a `fit_rows` rule, a `column_imputers` estimate --
-    and every setting keyed on a dropped column. Names that are not in the recipe are
+    and every setting keyed on a dropped column, including categorical overrides. Names that are not in the recipe are
     ignored.
     """
     names = set(names)
@@ -144,7 +144,10 @@ def drop_features(recipe: dict, names) -> dict:
     lists = ["numeric_features", "categorical_features", "flag_features", "mnar_indicator_sources"]
     return {**recipe, **{key: [c for c in recipe.get(key, []) if c not in names] for key in lists},
             "imputation": {**imputation, "row_bounds": {c: limits for c, limits in row_bounds.items() if limits},
-                           "fit_rows": kept("fit_rows"), "column_imputers": kept("column_imputers")}}
+                           "fit_rows": kept("fit_rows"), "column_imputers": kept("column_imputers"),
+                           **({"categorical_overrides": {c: spec for c, spec in imputation["categorical_overrides"].items()
+                                                        if c not in names}}
+                              if "categorical_overrides" in imputation else {})}}
 
 
 _SCALERS = {"none": "passthrough", "standard": StandardScaler, "minmax": MinMaxScaler, "robust": RobustScaler}
@@ -361,6 +364,10 @@ def check_feature_lists(preprocessing_config: dict, available_columns=None) -> N
             if overlap:
                 problems.append(f"{overlap} are in both {first} and {second}")
     indicator_sources = preprocessing_config.get("mnar_indicator_sources", [])
+    unknown_overrides = sorted(set(preprocessing_config.get("imputation", {}).get("categorical_overrides", {}))
+                               - set(groups["categorical_features"]))
+    if unknown_overrides:
+        problems.append(f"categorical_overrides {unknown_overrides} are not categorical features")
     orphan = sorted(set(indicator_sources) - set(groups["numeric_features"]) - set(groups["categorical_features"]))
     if orphan:
         problems.append(f"mnar_indicator_sources {orphan} are not numeric or categorical features")
@@ -384,6 +391,28 @@ def check_feature_lists(preprocessing_config: dict, available_columns=None) -> N
             problems.append(f"features not found in the data: {absent}")
     if problems:
         raise ValueError("Invalid preprocessing feature lists: " + "; ".join(problems))
+
+
+def build_categorical_imputer(imputation: dict, categorical_features):
+    """Optional per-column overrides keep purchase-category experiments separate from
+    customer-profile imputation. Output order and names stay the same as the input."""
+    default_strategy = imputation.get("categorical_strategy", "most_frequent")
+    default_fill = imputation.get("categorical_fill_value", "Missing")
+    overrides = imputation.get("categorical_overrides", {})
+
+    def imputer(spec):
+        strategy = spec.get("strategy", default_strategy)
+        if strategy not in ("most_frequent", "constant"):
+            raise ValueError("Categorical imputation supports most_frequent or constant.")
+        return SimpleImputer(strategy=strategy, keep_empty_features=True,
+                             fill_value=spec.get("fill_value", default_fill) if strategy == "constant" else None)
+
+    if not overrides:
+        return imputer({})
+    return ColumnTransformer([
+        (f"column_{i}", imputer(overrides.get(column, {})), [column])
+        for i, column in enumerate(categorical_features)
+    ], verbose_feature_names_out=False)
 
 
 def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
@@ -423,12 +452,8 @@ def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
         ("scale", scaler),
     ])
 
-    categorical_strategy = imputation.get("categorical_strategy", "most_frequent")
     categorical_pipeline = Pipeline([
-        ("impute", SimpleImputer(
-            strategy=categorical_strategy,
-            fill_value=imputation.get("categorical_fill_value", "Missing") if categorical_strategy == "constant" else None,
-        )),
+        ("impute", build_categorical_imputer(imputation, categorical_features)),
         ("group_rare", RareCategoryGrouper(min_count=preprocessing_config.get("rare_category_min_count", 0))),
         ("encode", encoder),
     ])

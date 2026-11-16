@@ -1,0 +1,13 @@
+task,variant,reference,seed,mean_advantage,std_difference,min_advantage,max_advantage,folds_a_better,folds_tied,n_folds,consistent_gain
+regression,history + mode,history + Missing,42,-2.453130582320182,6.34186816006742,-12.30935517182661,2.7481504989254972,3,0,5,False
+regression,history + Missing,history + Missing,42,0.0,0.0,-0.0,-0.0,0,5,5,False
+regression,no category history + mode,history + Missing,42,0.08605688340326197,4.823526503075959,-6.832855769659545,6.223558754430542,2,0,5,False
+regression,no category history + Missing,history + Missing,42,0.4744100248731229,4.013007282585171,-4.089869148694106,4.116825574072664,3,0,5,False
+regression,history + mode,history + Missing,1,1.0039618816069378,3.9739609444893547,-3.866728800771398,4.164312714166954,3,0,5,False
+regression,history + Missing,history + Missing,1,0.0,0.0,-0.0,-0.0,0,5,5,False
+regression,no category history + mode,history + Missing,1,0.45605285472479407,4.253425833176523,-4.082834032473329,5.645772214569661,3,0,5,False
+regression,no category history + Missing,history + Missing,1,0.3950248247452691,3.5992843899001463,-5.347695489684611,4.507851015810957,4,0,5,False
+regression,history + mode,history + Missing,2,0.5884656348489443,3.227970887969237,-4.324601700137009,3.982254224660437,3,0,5,False
+regression,history + Missing,history + Missing,2,0.0,0.0,-0.0,-0.0,0,5,5,False
+regression,no category history + mode,history + Missing,2,3.2624848792812826,6.450115435640356,-3.5441861069944025,12.137474636085244,3,0,5,False
+regression,no category history + Missing,history + Missing,2,0.031721204913128534,6.135870960399769,-5.984394336015157,8.971362376146772,3,0,5,False

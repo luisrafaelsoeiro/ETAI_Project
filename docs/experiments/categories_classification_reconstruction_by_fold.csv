@@ -1,0 +1,61 @@
+task,variant,fold,column,masked,correct,history_available,history_correct
+classification,history + mode,1,payment_type,81,69,51,50
+classification,history + mode,1,salesperson,81,71,48,44
+classification,history + mode,1,transport_method,81,35,46,30
+classification,history + Missing,1,payment_type,81,50,51,50
+classification,history + Missing,1,salesperson,81,44,48,44
+classification,history + Missing,1,transport_method,81,30,46,30
+classification,no category history + mode,1,payment_type,81,64,0,0
+classification,no category history + mode,1,salesperson,81,67,0,0
+classification,no category history + mode,1,transport_method,81,17,0,0
+classification,no category history + Missing,1,payment_type,81,0,0,0
+classification,no category history + Missing,1,salesperson,81,0,0,0
+classification,no category history + Missing,1,transport_method,81,0,0,0
+classification,history + mode,2,payment_type,80,70,58,53
+classification,history + mode,2,salesperson,81,61,57,55
+classification,history + mode,2,transport_method,81,51,54,43
+classification,history + Missing,2,payment_type,80,53,58,53
+classification,history + Missing,2,salesperson,81,55,57,55
+classification,history + Missing,2,transport_method,81,43,54,43
+classification,no category history + mode,2,payment_type,80,63,0,0
+classification,no category history + mode,2,salesperson,81,52,0,0
+classification,no category history + mode,2,transport_method,81,20,0,0
+classification,no category history + Missing,2,payment_type,80,0,0,0
+classification,no category history + Missing,2,salesperson,81,0,0,0
+classification,no category history + Missing,2,transport_method,81,0,0,0
+classification,history + mode,3,payment_type,81,75,66,64
+classification,history + mode,3,salesperson,81,67,72,63
+classification,history + mode,3,transport_method,80,50,66,48
+classification,history + Missing,3,payment_type,81,64,66,64
+classification,history + Missing,3,salesperson,81,63,72,63
+classification,history + Missing,3,transport_method,80,48,66,48
+classification,no category history + mode,3,payment_type,81,59,0,0
+classification,no category history + mode,3,salesperson,81,62,0,0
+classification,no category history + mode,3,transport_method,80,12,0,0
+classification,no category history + Missing,3,payment_type,81,0,0,0
+classification,no category history + Missing,3,salesperson,81,0,0,0
+classification,no category history + Missing,3,transport_method,80,0,0,0
+classification,history + mode,4,payment_type,81,72,73,70
+classification,history + mode,4,salesperson,81,67,69,62
+classification,history + mode,4,transport_method,81,45,66,44
+classification,history + Missing,4,payment_type,81,70,73,70
+classification,history + Missing,4,salesperson,81,62,69,62
+classification,history + Missing,4,transport_method,81,44,66,44
+classification,no category history + mode,4,payment_type,81,54,0,0
+classification,no category history + mode,4,salesperson,81,48,0,0
+classification,no category history + mode,4,transport_method,81,6,0,0
+classification,no category history + Missing,4,payment_type,81,0,0,0
+classification,no category history + Missing,4,salesperson,81,0,0,0
+classification,no category history + Missing,4,transport_method,81,0,0,0
+classification,history + mode,5,payment_type,81,73,73,72
+classification,history + mode,5,salesperson,81,68,70,65
+classification,history + mode,5,transport_method,81,47,68,47
+classification,history + Missing,5,payment_type,81,72,73,72
+classification,history + Missing,5,salesperson,81,65,70,65
+classification,history + Missing,5,transport_method,81,47,68,47
+classification,no category history + mode,5,payment_type,81,48,0,0
+classification,no category history + mode,5,salesperson,81,44,0,0
+classification,no category history + mode,5,transport_method,81,17,0,0
+classification,no category history + Missing,5,payment_type,81,0,0,0
+classification,no category history + Missing,5,salesperson,81,0,0,0
+classification,no category history + Missing,5,transport_method,81,0,0,0

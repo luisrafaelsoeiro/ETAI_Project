@@ -78,6 +78,61 @@ def expect_error(function, *args):
 
 
 # ---------------------------------------------------------------- feature lists
+def test_purchase_category_overrides_leave_profile_imputation_and_order_unchanged():
+    from src.preprocessing import build_categorical_imputer
+    columns = ["payment_type", "municipality", "transport_method"]
+    train = pd.DataFrame({"payment_type": ["card", "card", "cash"], "municipality": ["A", "A", "B"],
+                          "transport_method": ["van", "van", "truck"]})
+    query = pd.DataFrame([[np.nan, np.nan, np.nan], ["new", "C", "other"]], columns=columns)
+    settings = {"categorical_strategy": "constant", "categorical_fill_value": "Missing",
+                "categorical_overrides": {"payment_type": {"strategy": "most_frequent"},
+                                          "transport_method": {"strategy": "most_frequent"}}}
+    imputer = build_categorical_imputer(settings, columns).fit(train)
+    assert imputer.transform(query).tolist() == [["card", "Missing", "van"], ["new", "C", "other"]]
+    assert list(imputer.get_feature_names_out()) == columns
+    assert train.isna().sum().sum() == 0, "fitting must not alter training purchases"
+    recipe = {"numeric_features": [], "categorical_features": columns, "imputation": settings}
+    reduced = drop_features(recipe, ["transport_method"])
+    assert "transport_method" not in reduced["imputation"]["categorical_overrides"]
+    check_feature_lists(reduced)
+    invalid = {**recipe, "categorical_features": ["municipality"]}
+    assert "categorical_overrides" in expect_error(check_feature_lists, invalid)
+
+
+def test_history_experiment_changes_only_purchase_category_choices():
+    from src.experiments import categorical_history_variants
+    recipe = copy.deepcopy(task_data("regression")["preprocessing_config"])
+    variants, columns = categorical_history_variants(recipe)
+    assert len(variants) == 4 and "municipality" not in columns
+    for name, candidate in variants.items():
+        rules = candidate["customer_history"]["diagnostics"]["customer_history"]
+        assert rules["previous_purchase_gap"] == recipe["customer_history"]["diagnostics"]["customer_history"]["previous_purchase_gap"]
+        assert rules["use"], "date-gap history must remain enabled for all candidates"
+        assert candidate["imputation"]["categorical_strategy"] == recipe["imputation"]["categorical_strategy"]
+        assert "municipality" not in candidate["imputation"]["categorical_overrides"]
+        assert candidate["numeric_features"] == recipe["numeric_features"]
+        if name.startswith("no category history"):
+            assert rules["last_observed_columns"] == []
+    assert recipe["customer_history"]["diagnostics"]["customer_history"]["last_observed_columns"], "recipes must be independent copies"
+
+
+def test_ticket_ratio_compares_tax_inclusive_amounts_and_handles_zero_history():
+    from src.cleaning import add_derived_features
+    columns = {"ticket_vs_usual": config()["diagnostics"]["derived_features"]["ticket_vs_usual"]}
+    purchase = pd.DataFrame({"net_total": [100., 0., 100.], "total_tax": [23., 0., 23.],
+                             "prior_mean_purchase_value": [123., 0., 0.]})
+    result = add_derived_features(purchase, columns)
+    assert result.ticket_vs_usual.iloc[0] == 1., "a 123 euro current purchase should equal a 123 euro historical mean"
+    assert result.ticket_vs_usual.iloc[1:].isna().all(), "zero history must not produce infinity"
+    for task in TASKS:
+        data = task_data(task)
+        assert "ticket_vs_usual" not in data["preprocessing_config"]["numeric_features"], "the experiment must not enable the feature"
+        for part in ["X_dev", "X_kaggle"]:
+            X = data[part]
+            expected = ((X.net_total + X.total_tax) / X.prior_mean_purchase_value).replace([np.inf, -np.inf], np.nan)
+            assert np.allclose(X.ticket_vs_usual, expected, equal_nan=True)
+
+
 def test_history_is_refitted_at_outer_inner_and_holdout_boundaries():
     from unittest.mock import patch
     from sklearn.base import clone

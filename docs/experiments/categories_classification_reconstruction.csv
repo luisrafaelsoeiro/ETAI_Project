@@ -1,0 +1,13 @@
+task,variant,column,masked,correct,history_available,history_correct,accuracy,history_coverage,history_accuracy_when_available
+classification,history + mode,payment_type,404,359,321,309,0.8886138613861386,0.7945544554455446,0.9626168224299065
+classification,history + mode,salesperson,405,334,316,289,0.8246913580246914,0.7802469135802469,0.9145569620253164
+classification,history + mode,transport_method,404,228,300,212,0.5643564356435643,0.7425742574257426,0.7066666666666667
+classification,history + Missing,payment_type,404,309,321,309,0.7648514851485149,0.7945544554455446,0.9626168224299065
+classification,history + Missing,salesperson,405,289,316,289,0.7135802469135802,0.7802469135802469,0.9145569620253164
+classification,history + Missing,transport_method,404,212,300,212,0.5247524752475248,0.7425742574257426,0.7066666666666667
+classification,no category history + mode,payment_type,404,288,0,0,0.7128712871287128,0.0,
+classification,no category history + mode,salesperson,405,273,0,0,0.674074074074074,0.0,
+classification,no category history + mode,transport_method,404,72,0,0,0.1782178217821782,0.0,
+classification,no category history + Missing,payment_type,404,0,0,0,0.0,0.0,
+classification,no category history + Missing,salesperson,405,0,0,0,0.0,0.0,
+classification,no category history + Missing,transport_method,404,0,0,0,0.0,0.0,
