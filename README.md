@@ -6,6 +6,10 @@
 
 > **Controlled experiments — 2026-11-16:** purchase-category history × mode/Missing, plus legacy versus tax-inclusive `ticket_vs_usual`, were tested on the five development folds. Regression repeats three forest seeds. No alternative improved on every fold; current category policies and feature lists remain unchanged. The candidate ratio now uses a coherent tax-inclusive definition but stays outside both models. See [results, reconstruction checks and replay commands](docs/preprocessing_experiments.md) (notebook 03 §15 and notebook 06 §12).
 
+**Refreshed recipe comparisons — 2026-11-16:** the 32 encoder/scaler recipes and expanded KNN sensitivity test are executed. Classification minmax has the best grid mean but loses three folds; KNN k=3 improves four and ties one. Ridge target + minmax leads its grid. Regression KNN gains are tiny, while removing the spend estimate is a candidate for model-specific assessment. Defaults remain references; see [scope, results and evidence](docs/recipe_comparisons.md).
+
+**Why these preprocessing choices?** See the [decision register](docs/preprocessing_decisions.md) for each rule or modelling hypothesis, alternatives, numerical evidence, provisional decisions and comparisons still awaiting execution. Data definitions and empirical modelling choices have different justifications.
+
 ## Project Overview
 
 This project was developed as part of the **ETAI 2026/27 Group Project**.
@@ -114,7 +118,7 @@ ETAI_Project/
 │   │                               # locked test set, temporal folds and the decision rule
 │   ├── 02_customer_table.ipynb     # full preprocessing of clientes.csv and its join, tested in temporal CV
 │   ├── 03_missing_values.ipynb     # target missingness, missingness mechanism, exact recoveries, customer-history
-│   │                               # fill, row limits, estimates from related columns, imputers, KNN settled
+│   │                               # fill, row limits, estimates from related columns, imputers, expanded KNN sensitivity
 │   ├── 04_outlier_detection.ipynb  # data errors vs valid extremes, transformations and row removal in temporal CV
 │   ├── 05_preprocessing_and_models.ipynb        # build_preprocessor, encoder x scaler, models, final model scores
 │   ├── 06_feature_engineering_selection.ipynb   # data additions, redundancy, relevance, permutation importance,
@@ -182,12 +186,12 @@ See `data/README.md` for the files and the column dictionary. Each row is a **cu
 | Data diagnosis | Column standardisation, invalid values, placeholder, almost-empty rows, category text, target missingness, date checks, duplicates | `notebooks/01_data_cleaning.ipynb` sections 1–4 (target missingness: `03_missing_values.ipynb` section 1) |
 | Preprocessing → pipeline | Diagnosis turned into config-driven rules; identity recovery; structural missingness; missingness-mechanism tests; temporal locked test set; leak-safe `ColumnTransformer` | `src/`, `config.yaml`, notebook 01 sections 5–6, notebook 03 section 3, notebook 05 section 1 |
 | Encoder × scaler + models | Temporal cross-validation, 16-recipe comparison per task, paired comparisons, Pipeline with dummy / linear / tree / random forest | `src/evaluate.py`, `*/model.py`, notebook 01 section 7, notebook 05 sections 2–3 |
-| Regression target + notebook clean-up | Missing-spend mechanism tested (not MCAR), `log1p` target tested and rejected; notebook sections 1–4 call the `src/` functions | `regression/model.py`, notebook 03 section 1, notebook 05 section 3 |
+| Regression target + notebook clean-up | Missing-spend associations and customer-relative coverage diagnosed (cause unconfirmed), `log1p` target tested and rejected; notebook sections 1–4 call the `src/` functions | `regression/model.py`, notebook 03 section 1, notebook 05 section 3 |
 | Data quality + additions + imputers | Accounting identity explained; consistency rules fix inflated values; purchase-time features, customer table and rare-category grouping tested by ablation; 5 numeric and 2 categorical imputers compared in CV | `src/cleaning.py`, `src/evaluate.py`, notebook 01 sections 5.2 and 8, notebook 06 section 1, notebook 03 section 4 |
 | Data types + outliers | Compact dtypes (`standardize_dtypes`); `prior_max_purchase_value ≤ prior_total_spend` rule; outlier analysis with temporal validation (no statistical deletion or capping) | `config.yaml` → `dtypes`, `notebooks/04_outlier_detection.ipynb` |
 | Validation + pipeline checks | Placeholder-token report and NaN-on-load; schema validation; `customer_id` validation; feature-list checks; missing indicators inside the pipeline; save → load → predict new records | `src/data.py`, `src/pipeline.py`, `tests/`, notebook 01 sections 2.2, 2.8, 4.4, notebook 05 section 1 |
 | Customer table | Full preprocessing of clientes.csv: validation, key and duplicate checks, labels → codes, exact recovery through the geographic hierarchy, island as structural `"none"`, "customer before the records" flag, profile completeness, rare-level back-off (tested, off) | `src/customers.py`, `config.yaml` → `customers`, `notebooks/02_customer_table.ipynb` |
-| Imputation | Exact recovery of the largest / smallest previous purchase; gaps filled from the customer's earlier purchases (categories, days since the previous purchase); imputed values kept within their row's limits; `spend_365d` estimated from related columns (regression); medians learned without structural zeros; KNN settled with a tuned forest (median stays) | `src/cleaning.py`, `src/preprocessing.py` → `RowBoundedImputer`, `notebooks/03_missing_values.ipynb` |
+| Imputation | Exact recovery of the largest / smallest previous purchase; gaps filled from the customer's earlier purchases (categories, days since the previous purchase); imputed values kept within their row's limits; `spend_365d` estimated from related columns (regression); medians learned without structural zeros; expanded KNN comparison with a median-tuned forest (sensitivity only) | `src/cleaning.py`, `src/preprocessing.py` → `RowBoundedImputer`, `notebooks/03_missing_values.ipynb` |
 | Repository reorganisation | Baseline-pipeline structure. Shared code split into `src/data`, `cleaning`, `preprocessing`, `pipeline`, `evaluate`, `tuning`, `results`; task packages reduced to what differs (`preprocessing`, `model`, `evaluate`). `main.py` runs the full workflow (dummy floor, temporal CV, optional Optuna + nested CV, scoreboard, run reports, optional locked-test evaluation, saved models, Kaggle predictions). Notebooks moved to `notebooks/`; redundant files removed | whole repository |
 | Notebook reorganisation | The five notebooks regrouped into six, one per stage of the workflow: data cleaning → customer table → missing values → outliers → preprocessing recipe and models → feature engineering and selection. Sections moved, nothing removed. The locked test set, the temporal folds and the decision rule come first (notebook 01, sections 6–7), and every notebook runs on its own | `notebooks/` |
 | Feature engineering + selection | Redundancy (correlation clusters, VIF), relevance (mutual information against a shuffled-target floor) and out-of-fold permutation importance; seven customer-behaviour features tested by paired ablation (none kept); an optional selection step in the Pipeline (variance, L1, forest, k-best; none beats the fixed lists, so it is off); 6 columns without signal per task removed through `exclude_features`, confirmed on the temporal folds | `config.yaml` → `exclude_features`, `diagnostics.derived_features`, `preprocessing.selection`; `src/preprocessing.py` → `drop_features`, `build_selector`; `notebooks/06_feature_engineering_selection.ipynb` |
@@ -288,19 +292,21 @@ Together with the new identities, this leaves about a third of the gaps for the 
 
 These gaps aren't MCAR, MAR or MNAR: the value is *not applicable*. A median would invent a purchase history for a first-time customer. So they are set to **0** (`diagnostics.structural_fill`), a rule from the column definitions, not a fitted value. Two flags let a model tell "0 because undefined" apart from a real 0: `is_first_purchase` (`prior_purchase_count == 0`) and `has_gap_history` (`prior_purchase_count >= 2`).
 
-#### 2.7 Mechanism of the remaining gaps [03 §3, §8, §10]
+#### 2.7 Remaining gaps: association diagnostics and provisional treatment [03 §3–4, §8, §10]
 
-For each remaining gap we tested whether *being missing* is related to the target (χ²) or to any other feature (Mann-Whitney U / χ² with categories under 30 rows grouped), with a Bonferroni threshold.
+Notebook 03 section 3 screens missingness associations with the target and observed predictors on the classification development rows, before fitted history filling. It reports detected / non-detected associations, not MCAR/MAR/MNAR verdicts. A non-significant result does not establish MCAR; associations do not distinguish MAR from MNAR or automatically select an imputer or flag.
 
-| Column | Missing (train) | Evidence | Mechanism | Treatment (fitted on training rows) |
-|---|---|---|---|---|
-| `days_since_previous_purchase`, `prior_mean_gap_days` | 8 rows (0.1%) | no relation to target or features; the previous purchase is always in the data | MCAR | **filled exactly** from the previous purchase date (§2.5); nothing left for the imputer |
-| `payment_type`, `salesperson`, `transport_method`, `warehouse` | ~3% each, never on the same rows | target rate 0.55–0.64 vs 0.56, no relation to the row's other columns, **but explained by the customer**: the customer's last value is right on 81–99% of purchases | MAR given the customer | the customer's last earlier value (§2.5); what is left (12–25 per column on the development set, a customer's first known purchase) → most frequent (regression: `"Missing"`, §10) |
-| `spend_365d` | 182 rows (2.8%) | MCAR in the raw data (tenure p = 0.84); after the identity fill only tenure > 365 days stays missing | MAR | regression: **365-day purchase count × mean purchase value**; classification: median of rows with a purchase history. Both **kept between `spend_180d` and `prior_total_spend`**, **+ missing indicator** (`MissingIndicator` in the pipeline) |
-| `prior_max_purchase_value` | 45 rows (0.7%) | the inflated maxima set to `NaN` in §3; repurchase rate 0.53 vs 0.56 (p = 0.84); only associated with `transport_method` (80 levels) | gap marks a corrupted value | 4 recovered exactly (§2.5); the rest: median of rows with a purchase history, **kept between `prior_mean_purchase_value` and total − (count − 1) × min**, **no indicator**: a flag would teach the model to recognise the corruption |
-| `commercial_region`, `island`, `municipality` (customer table, regression only) | 0.5% / 0.5% / 3.4% | what is left after the customer-table preprocessing (§13): a blank island is structural (`"none"`), and regions are recovered exactly. The rest are incomplete customer profiles, related to other geography (`municipality` also to the target) | MAR | explicit `"Missing"` category, which acts as the indicator for a categorical column (§10) |
+| Situation | Current treatment | Justification and status |
+|---|---|---|
+| Recoverable purchase-history values | Conditional identities and previous-purchase date recovery | Follow the column definitions when the required inputs and conditions hold. |
+| Undefined short-history statistics | Specified structural gaps represented by 0, with history flags | Distinguish not applicable from an unknown measured value. |
+| Remaining numerical predictor gaps | Median without specified structural rows; row limits | Simple provisional baseline, assessed against alternatives in notebook 03. |
+| `spend_365d`, regression | Purchase count x historical mean, then median fallback | Customer-specific estimate, not an identity; downstream estimate search remains pending. |
+| Remaining purchase categories | Earlier customer value, then mode / Missing by task | Carry-forward is a modelling hypothesis; controlled comparisons in section 15. |
+| Incomplete customer-profile categories, regression | Explicit Missing | Represent an unknown profile category; reassess with shortlisted models. |
+| `spend_365d` indicator | Flag the gap before numerical imputation | A modelling hypothesis motivated by the tenure/history pattern, not proof of MNAR. |
 
-An automatic `SimpleImputer(add_indicator=True)` would flag every column with gaps, including the MCAR ones, where a flag only adds noise. We flag only where the evidence says the gap carries information (`preprocessing.mnar_indicator_sources`).
+The [decision register](docs/preprocessing_decisions.md) links the definitions, observed-value checks, comparison results and pending experiments. No missingness mechanism is assumed established by this screen.
 
 **Imputed values stay within their row's limits** (`RowBoundedImputer`, `preprocessing.imputation.row_bounds`; notebook 03, section 8). A single median ignores the rest of the row: it put **77 of the 137** imputed `spend_365d` values below the customer's own 180-day spend or above everything they ever spent, and 9 of 35 `prior_max_purchase_value` values below their mean or above what the total allows. After imputing, an **imputed** value outside its row's limits is moved to the nearest limit (`spend_365d` within [`spend_180d`, `prior_total_spend`]; `prior_max_purchase_value` within [mean, total − (count − 1) × min]; gap days ≤ `customer_tenure_days`). Observed values are never changed. KNN and iterative imputation still work in scaled space, and the step returns the original units so the limits can be compared, before the scaler.
 
@@ -491,37 +497,27 @@ See [scikit-learn's discussion of dependent CV scores](https://scikit-learn.org/
 
 ### 9. Encoder × scaler [05 §2]
 
-All 16 combinations (one-hot, ordinal, count, target × none, standard, min-max, robust) were scored with a scaling-sensitive model (logistic regression / ridge).
+**Refreshed 2026-11-16:** all 16 combinations per task completed on the same five temporal folds with current features, imputation and frozen history. Comparison models: logistic regression / Ridge. Per-fold CSVs and provenance: [recipe comparisons](docs/recipe_comparisons.md).
 
-| Task | Chosen | Validation | Reason |
+| Task / comparison model | Reference | Best mean in grid | Interpretation |
 |---|---|---|---|
-| Classification | **target + standard** | accuracy 0.708 | Target + min-max ranks first but is tied (+0.003, SE 0.007), and so is target + robust, so the current pair stays. Decisively ahead of one-hot (+0.009, SE 0.0035) with one column per feature. Count encoding takes the bottom 4 places; no scaling drops target encoding to 0.695. |
-| Regression | **target + min-max** | RMSE 2056 | Ranks first, and min-max is the best scaler for every encoder. Ordinal + min-max is a tie (6 RMSE, SE 5) but would impose a fake order. It beats target + robust by 177 RMSE on all 5 folds. |
+| Classification / logistic regression | target + standard: accuracy 0.709505 | target + minmax: 0.714041 | +0.004536 on average, but better on only 2/5 folds. Keep the reference; minmax is a candidate for modelling experiments. |
+| Regression / Ridge | target + minmax: RMSE 2032.6187 euros | same reference | Best mean in this grid; beats target + standard and robust on every fold. This is not the random forest's score. |
 
-*The scores of this comparison were computed with the feature set before the exclusions of §5 (notebook 05, section 2 is to be re-run); the pairs are expected to rank the same, to be confirmed then.*
+Differences are descriptive, not significance/equivalence results. Scaling interacts with regularisation at fixed C/alpha; revisit preprocessing with shortlisted models. The grid did not change the configuration.
 
 ### 10. Alternative imputers [03 §4, §11–12]
 
-Each imputer is fitted inside each fold, with the row limits and estimates of §2.7. KNN and iterative impute in scaled space. Re-run with the final recipe (`notebooks/03_missing_values.ipynb`, section 11; the first comparison is section 4 of the same notebook).
+The refreshed section 4 comparison fits each imputer within each fold, with current row limits and estimates. KNN and iterative imputation work in scaled space. Positive classification differences and lower regression errors favour the alternative.
 
-| Imputer | Classification (accuracy vs median) | Regression (RMSE vs median) |
-|---|---|---|
-| numeric `mean` | −0.0007 | 0.3 better (3/5 folds) |
-| numeric `constant` (0) | −0.0014 (0/5 folds, above the former 2SE cutoff) | 2.0 worse (0/5 folds) |
-| numeric `knn` (5 neighbours) | 0.0000 | 1.5 worse (2/5 folds) |
-| numeric `iterative` | +0.0005 | 1.1 worse (2/5 folds) |
-| categorical: the alternative to the current one | `"Missing"`: −0.0002 | most frequent: 2.4 worse (4/5 folds, **above the former 2SE cutoff**) |
+| Numeric fallback | Classification accuracy | Regression RMSE, euros |
+|---|---:|---:|
+| Median, reference | 0.709505 | 1937.3293 |
+| KNN, 5 neighbours | 0.7109 | 1937.2830 |
 
-* **The median stays for both tasks.** No imputer is better under the former 2SE heuristic.
-* **KNN is settled** (notebook 03, section 12). KNN was once better under the former 2SE heuristic for the regression (6.0 RMSE, SE 2.9, in an earlier version of notebook 03, section 4). It was re-tested with a **tuned** random forest (Optuna, 30 trials: 488 trees, depth 12), 3 / 5 / 10 / 20 neighbours, uniform or distance weighting, and 3 forest seeds:
-  * no setting is above the former 2SE cutoff for any seed;
-  * the best is 0.4 RMSE better on average;
-  * neighbours and weighting change the result by less than 0.2 RMSE;
-  * for the classification, KNN is never better;
-  * it makes the preprocessor about 2.5× slower (classification).
+In this five-neighbour comparison, KNN improves three of five folds in each task. The expanded section 12 is now executed: classification KNN k=3 uniform reaches 0.711655 versus 0.709505 for median, improving four folds and tying one with none worse. With the median-tuned forest, best regression KNN mean gain is only 0.2288 euros on three of five seed-averaged folds. Removing the spend formula improves 9.0426 euros on four folds but loses one, and remains a candidate for the upcoming model-specific comparisons. Keep median as the reference while carrying the promising alternatives forward; do not call it a demonstrated winner. See [full scope, timing and results](docs/recipe_comparisons.md).
 
-  KNN's old gain came from a better `spend_365d`. Without count × mean, KNN still matches the median **with** it, and count × mean now gives that gain with a formula. Closed: the median stays.
-* **Categorical:** the regression keeps an explicit `"Missing"` category, now with an advantage under the former 2SE heuristic. The remaining customer gaps are incomplete profiles related to the target, and filling them with the most common region or municipality would hide that. Classification keeps the most frequent value.
+For categorical fallbacks, the controlled history × mode/Missing experiment is in [the experiment record](docs/preprocessing_experiments.md). Current per-task policies remain provisional. The broad imputer/feature searches not refreshed in this run retain their pending status.
 
 ### 11. Recipe + model = one Pipeline [05 §3–4]
 
@@ -555,20 +551,20 @@ The main metric is accuracy for classification and RMSE for regression (`<task>.
 | `global_discount_total` | none | all rules pass; zero in 98.6% of rows | **excluded in both tasks** | no signal (§5) |
 | `cost` | 39 rows above `net_total` | sales below cost, plausible; correlation with the targets at the level of `random_noise` | kept as is (classification); **excluded in regression** | contradicts no other column; no signal (§5) |
 | `customer_tenure_days`, `prior_purchase_count`, `prior_total_spend` | none | consistent with every rule and across a customer's purchases | median → scaler | — |
-| `days_since_previous_purchase` | 16 negatives; undefined on first purchases | structural (603) + MCAR (8 left) | → `NaN`; recomputed (201); 0 + flag when undefined; the 8 left = date difference to the previous purchase (§2.5) | exact recovery first, then a mechanism-matched fill |
+| `days_since_previous_purchase` | 16 negatives; undefined on first purchases | structural (603) + 8 unknown gaps in the earlier diagnostic | → `NaN`; recomputed (201); 0 + flag when undefined; the 8 left = date difference to the previous purchase (§2.5) | exact recovery first, then a provisional fitted fallback |
 | `prior_mean_purchase_value` | 16 negatives, 16 placeholders, 46 inflated 8–25× | identity with total / count | → `NaN`, recomputed exactly (272); 0 + flag on first purchases | the identity holds on 99.2% of valid rows |
 | `prior_max_purchase_value` | undefined on first purchases; 45 above all prior spend | structural (603) + corrupted (45) | 0 + `is_first_purchase`; corrupted → `NaN`; recovered exactly with 1–2 previous purchases (4); the rest median of rows with a history, within the row's limits, no indicator | one purchase can't exceed the total |
 | `prior_min_purchase_value` | undefined on first purchases | structural (603) | 0 + `is_first_purchase`; identities with 1–2 previous purchases for future gaps | not applicable ≠ missing |
 | `prior_std_purchase_value` | undefined with < 2 purchases | structural (1,048) | 0 + `has_gap_history` | a std needs two values |
-| `prior_mean_gap_days` | 16 negatives; undefined with < 2 purchases | structural (1,048) + MCAR (8 left) | → `NaN`; recomputed (203); 0 + flag; the 8 left recomputed from the filled gap (§2.5) | as above |
+| `prior_mean_gap_days` | 16 negatives; undefined with < 2 purchases | structural (1,048) + 8 unknown gaps in the earlier diagnostic | → `NaN`; recomputed (203); 0 + flag; the 8 left recomputed from the filled gap (§2.5) | as above |
 | `prior_std_gap_days` | undefined with < 3 purchases | structural (1,413) | 0 + `has_gap_history` | a std of gaps needs two gaps |
 | `purchase_count_30/90/180/365d`, `spend_30/90/180d` | none | nested windows consistent on 100% | median → scaler | — |
-| `spend_365d` | 15 negatives, 15 placeholders, 39 above all prior spend | MAR after the identity fill | → `NaN`; recomputed when tenure ≤ 365 (82); regression: count × mean, classification: median of rows with a history; kept within [`spend_180d`, `prior_total_spend`] + `MissingIndicator` | the gap carries information about tenure; a plain median broke the row's limits on 56% of imputed values; count × mean is 2.9× closer on hidden values |
-| `payment_type`, `salesperson`, `transport_method` | ~3% blank each; unseen test categories; `transport_method` 80 levels | MAR given the customer (last value right on 81–99% of purchases); every label allowed | customer's last earlier value; the rest most frequent (regression: `"Missing"`) → target encoder; no rare grouping | the customer's own past is the best estimate; the encoder handles unseen and rare categories |
+| `spend_365d` | 15 negatives, 15 placeholders, 39 above all prior spend | tenure/history pattern after identity fill; mechanism unconfirmed | → `NaN`; recomputed when tenure ≤ 365 (82); regression: count × mean, classification: median of rows with a history; kept within [`spend_180d`, `prior_total_spend`] + `MissingIndicator` | the gap carries information about tenure; a plain median broke the row's limits on 56% of imputed values; count × mean is 2.9× closer on hidden values |
+| `payment_type`, `salesperson`, `transport_method` | ~3% blank each; unseen test categories; `transport_method` 80 levels | historical category agreement on 81–99% of pooled purchases (descriptive, not a missingness mechanism); every label allowed | customer's last earlier value; the rest most frequent (regression: `"Missing"`) → target encoder; no rare grouping | the customer's own past is the best estimate; the encoder handles unseen and rare categories |
 | `commercial_zone`, `warehouse`, `document_series` | ~3% blank (`warehouse`); unseen test categories (`commercial_zone`); every label allowed | dominated by one category (`commercial_zone`, `warehouse`) or ≈ 55% repurchase in every category (`document_series`) | target encoder (regression: `document_series`); **excluded:** `commercial_zone` and `warehouse` in both tasks, `document_series` in classification | no signal (§5) |
 | `random_noise` | — | correlation with target −0.012 | dropped | pure noise |
 | `repeat_purchase_90d` | — | complete | classification target, never imputed | — |
-| `spend_next_90d` | missing for all non-repeaters and 5.4% of repeaters | structural + not MCAR | regression trains on observed rows only; no log transform | a target is never imputed; log1p was worse |
+| `spend_next_90d` | missing for all non-repeaters and 5.4% of repeaters | structural for non-returners; coverage pattern for unknown positive targets | regression trains on observed rows only; no log transform | a target is never imputed; log1p was worse |
 | `commercial_region`, `island`, `municipality` (`clientes.csv`) | labels with filler text; region 10% missing; island 51% blank; 183 municipalities | strict geographic hierarchy; island undefined outside 2 regions | labels → codes; region recovered exactly (71); island → `"none"` (535); regression only: `"Missing"` → target encoder | correct values first; lowers RMSE |
 | `country_or_region` (`clientes.csv`) | 94.4% of customers in one country | label with filler text | **excluded** (computed, not used) | no variation to learn from |
 | `customer_since_year` (`clientes.csv`) | 664 of 1,143 customers dated 2015, the first year of the records | never after the purchase year; 2015 = "before the records start" | → `years_as_customer` at the purchase (regression); `customer_since_before_records` flag computed but **excluded** | known at purchase time; the flag changes nothing measurable once the year is there (§5) |

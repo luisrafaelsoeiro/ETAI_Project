@@ -467,9 +467,11 @@ preprocessing:
   mnar_indicator_sources: [spend_365d]
   imputation:
     numeric_strategy: median          # median | mean | constant | knn | iterative (nb03 4)
-    # knn only: n_neighbors (default 5) and knn_weights (uniform | distance). KNN is settled:
-    # with a tuned forest no k (3/5/10/20) or weighting is decisive (nb03 12)
-    # -> median
+    # knn only: n_neighbors (default 5) and knn_weights (uniform | distance).
+    # nb03 12 refreshed: classification KNN k=3 uniform improves 4 folds, ties 1.
+    # Regression KNN gains are tiny in the median-tuned forest sensitivity test.
+    # Retain median as the reference; carry promising variants into model comparisons.
+    # Rationale and evidence status: docs/preprocessing_decisions.md.
     categorical_strategy: most_frequent
     # the numeric imputer learns these columns only from training rows meeting the condition:
     # on a first purchase their 0 is the structural "no history" (diagnostics.structural_fill),
@@ -513,7 +515,7 @@ preprocessing:
   # 0 = off. Grouping categories under N training rows into "rare" was worse for both
   # tasks (nb06 1.2): the target encoder already shrinks rare categories
   rare_category_min_count: 0
-  # shared default; each task overrides it with the pair its own comparison chose
+  # shared default; each task overrides it. Refreshed encoder/scaler grid: nb05 2.
   encoder: target                     # onehot | ordinal | count | target
   scaler: robust                      # none | standard | minmax | robust
   # columns removed from the feature lists of BOTH tasks: no signal (mutual information below the
@@ -547,11 +549,10 @@ classification:
     - {type: logistic_regression, params: {max_iter: 2000}}
     - {type: decision_tree, params: {max_depth: 5, random_state: 42}}
     - {type: random_forest, params: {n_estimators: 300, min_samples_leaf: 5, n_jobs: -1, random_state: 42}}
-  # nb05 2: target + standard, tied with target + minmax / robust (no pair is decisively
-  # better -> keep). nb06 1.2: none of the new features helps -> original features;
-  # nb03 4: median / most frequent
-  # nb06 9.1: + 3 more columns without signal; the 6 excluded columns (3 shared) take the model from
-  # 35 to 29 columns with accuracy 0.0019 higher (not decisive, 2/5 folds), so nothing is lost.
+  # nb05 2 refreshed: target + minmax has the best mean but improves only 2/5 folds.
+  # Retain target + standard as a reference; nb06 full feature ablations await rerun.
+  # nb03 4: retain median / most frequent as a reference, not a demonstrated optimum.
+  # The excluded columns retain the earlier feature list; reassess with shortlisted models.
   # `is_first_purchase` stays although it is exactly prior_purchase_count == 0: first purchases are a
   # segment of their own (exploration 9.3) and a linear or distance-based model cannot build the flag
   # from the count; to be confirmed on each final model before it is excluded
@@ -559,9 +560,7 @@ classification:
     encoder: target
     scaler: standard
     exclude_features: [document_series, shipping_cost, invoice_count_current_purchase]
-  # nb05 3: validation accuracy 0.708, no train/validation gap; the random forest ties it
-  # (0.0005 ahead, SE 0.0035, not decisive) and overfits (train 0.85) -> keep
-  # (current numbers: nb05 4)
+  # Working reference model; full nb05 model ranking awaits rerun under the corrected protocol.
   # types: dummy | logistic_regression | knn | decision_tree | random_forest | extra_trees |
   #        gradient_boosting | hist_gradient_boosting | xgboost
   model: {type: logistic_regression, params: {max_iter: 2000}}
@@ -608,38 +607,32 @@ regression:
     - {type: ridge, params: {alpha: 1.0}}
     - {type: decision_tree, params: {max_depth: 5, random_state: 42}}
     - {type: random_forest, params: {n_estimators: 300, min_samples_leaf: 5, n_jobs: -1, random_state: 42}}
-  # nb05 2: target + minmax ranks first (ordinal + minmax is a tie, and ordinal would
-  # impose a meaningless order on unordered categories)
+  # nb05 2 refreshed: target + minmax has the lowest Ridge RMSE in the 16-recipe grid.
+  # This supports the linear-model reference, not a best recipe for every regressor.
   preprocessing:
     encoder: target
     scaler: minmax
-    # nb06 1.2: date parts (48 RMSE, 5/5 folds) and customer features (44 RMSE) lower
-    # RMSE; the derived ratios add nothing
+    # Features retained from earlier nb06 comparisons; full ablations await rerun.
     # nb02 12: + profile completeness and "customer before the records"
     extra_numeric_features: [purchase_month, purchase_weekday, years_as_customer, profile_completeness,
                              customer_since_before_records]
     extra_categorical_features: [country_or_region, commercial_region, island, municipality]
-    # nb06 9.1: + 3 columns without signal. The 6 excluded columns (3 shared) take the model from 44 to
-    # 38 columns, RMSE 6.2 lower (4/5 folds, SE 2.4: decisive). `has_gap_history`, `line_item_count`,
-    # `profile_completeness`, `document_series`, `purchase_weekday` and `shipping_cost` stay: dropping any of
-    # them as well makes the RMSE 2.8 to 4.2 higher. `has_gap_history` is exactly prior_purchase_count >= 2,
-    # but it tells "no gap history" apart from "short gaps" for models that cannot build it from the count
+    # Provisional exclusions from nb06; current model-specific benefit is not established.
+    # `has_gap_history` represents prior_purchase_count >= 2 explicitly.
     exclude_features: [cost, country_or_region, customer_since_before_records]
-    # nb03 4: an explicit "Missing" category: the remaining customer gaps are incomplete
-    # profiles related to the target; most frequent is now decisively worse (2.4 RMSE,
-    # nb03 11)
+    # Explicit "Missing" represents an unknown category. Refreshed nb03 4/15 comparisons
+    # support retaining this policy provisionally; they do not prove it optimal.
     imputation:
       categorical_strategy: constant
       categorical_fill_value: Missing
-      # 365-day spend = 365-day purchase count x mean purchase value: recovers hidden known
-      # values 2.9x closer than the median (MAE 1,217 vs 3,478); the row limits move 7% of its
-      # values vs 61% of the median's; RMSE better on 4 of 5 folds for 3 of 4 forest seeds,
-      # never decisive (nb03 10). The classification keeps
-      # the median: there it costs 0.0005-0.001 accuracy, better on 0 of 5 folds
+      # Count x historical mean is an estimate, not an identity for last-year spend.
+      # Retained as reference; nb03 12 finds no-formula a candidate (4/5 folds better).
+      # The full nb03 10 estimate search still awaits rerun with shortlisted models.
+      # Reconstruction of masked observed values alone does not establish predictive gain.
       column_imputers:
         spend_365d: {strategy: formula, expression: "purchase_count_365d * prior_mean_purchase_value"}
-  # nb05 3: lowest validation RMSE (1942, nb05 4); ahead
-  # of ridge on 3 of 5 folds (113 RMSE, SE 74: not decisive). target_transform: none | log1p -- log1p was decisively worse in euros.
+  # Working reference forest and untransformed target; nb05 full comparisons await rerun.
+  # target_transform: none | log1p (assess errors back in euros).
   # types: dummy | ridge | decision_tree | random_forest | gradient_boosting |
   #        hist_gradient_boosting | xgboost
   model:
