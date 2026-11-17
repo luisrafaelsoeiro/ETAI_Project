@@ -1,0 +1,154 @@
+{
+  "source_commit": "93c3975154b98656b51bae21113154f584240d89",
+  "source_notebook_sha256": "3d8beeb6b495bc54edb1cd7b66ecc5b28876d10fd61047d0b2a6ecf84570adf3",
+  "scope": "Recorded aggregate outputs, with error signs corrected algebraically; full tuning was not rerun in the text review.",
+  "precision": "Original displayed precision; do not interpret these rows as raw per-fold records.",
+  "selected_model": "random_forest",
+  "selected_params": {
+    "model__n_estimators": 234,
+    "model__max_depth": 16,
+    "model__min_samples_leaf": 11,
+    "model__max_features": 1.0
+  },
+  "tuning_summary": {
+    "random_forest": {
+      "untuned": 1937.329,
+      "best trial (optimistic)": 1933.62,
+      "nested CV (honest)": 1947.916,
+      "nested std": 226.187,
+      "tuned minus untuned": 10.587
+    },
+    "ridge": {
+      "untuned": 2032.619,
+      "best trial (optimistic)": 1985.977,
+      "nested CV (honest)": 1987.897,
+      "nested std": 214.001,
+      "tuned minus untuned": -44.722
+    },
+    "hist_gradient_boosting": {
+      "untuned": 2024.789,
+      "best trial (optimistic)": 1945.037,
+      "nested CV (honest)": 1998.962,
+      "nested std": 226.393,
+      "tuned minus untuned": -25.827
+    },
+    "xgboost": {
+      "untuned": 2018.916,
+      "best trial (optimistic)": 1949.29,
+      "nested CV (honest)": 2041.285,
+      "nested std": 202.594,
+      "tuned minus untuned": 22.368
+    },
+    "gradient_boosting": {
+      "untuned": 2030.689,
+      "best trial (optimistic)": 2004.648,
+      "nested CV (honest)": 2048.56,
+      "nested std": 237.471,
+      "tuned minus untuned": 17.871
+    },
+    "decision_tree": {
+      "untuned": 2461.816,
+      "best trial (optimistic)": 2018.284,
+      "nested CV (honest)": 2068.582,
+      "nested std": 223.716,
+      "tuned minus untuned": -393.234
+    }
+  },
+  "nested_comparison": {
+    "random_forest": {
+      "rmse": 1947.916,
+      "mae": 1260.479,
+      "median_ae": 774.732,
+      "r2": 0.33,
+      "rmse_std": 226.187,
+      "train_rmse": 1010.88,
+      "overfit_gap": 937.036
+    },
+    "ridge": {
+      "rmse": 1987.897,
+      "mae": 1311.875,
+      "median_ae": 813.681,
+      "r2": 0.293,
+      "rmse_std": 214.001,
+      "train_rmse": 1550.979,
+      "overfit_gap": 436.918
+    },
+    "hist_gradient_boosting": {
+      "rmse": 1998.962,
+      "mae": 1287.449,
+      "median_ae": 760.229,
+      "r2": 0.289,
+      "rmse_std": 226.393,
+      "train_rmse": 1253.086,
+      "overfit_gap": 745.876
+    },
+    "xgboost": {
+      "rmse": 2041.285,
+      "mae": 1324.959,
+      "median_ae": 824.062,
+      "r2": 0.264,
+      "rmse_std": 202.594,
+      "train_rmse": 1287.566,
+      "overfit_gap": 753.718
+    },
+    "gradient_boosting": {
+      "rmse": 2048.56,
+      "mae": 1313.455,
+      "median_ae": 811.004,
+      "r2": 0.253,
+      "rmse_std": 237.471,
+      "train_rmse": 1488.738,
+      "overfit_gap": 559.821
+    },
+    "decision_tree": {
+      "rmse": 2068.582,
+      "mae": 1327.317,
+      "median_ae": 794.589,
+      "r2": 0.246,
+      "rmse_std": 223.716,
+      "train_rmse": 1613.828,
+      "overfit_gap": 454.754
+    },
+    "dummy (training mean)": {
+      "rmse": 2471.553,
+      "mae": 1637.982,
+      "median_ae": 1205.269,
+      "r2": -0.05,
+      "rmse_std": 237.755,
+      "train_rmse": 1940.177,
+      "overfit_gap": 531.376
+    }
+  },
+  "published_summary": {
+    "nested CV MAE (EUR)": {
+      "value": 1260.478845
+    },
+    "nested CV RMSE (EUR)": {
+      "value": 1947.91589
+    },
+    "nested CV R2": {
+      "value": 0.330404
+    },
+    "rmse": {
+      "value": 2520.415752
+    },
+    "mae": {
+      "value": 1285.919592
+    },
+    "median_ae": {
+      "value": 654.3112
+    },
+    "r2": {
+      "value": 0.408524
+    },
+    "bias": {
+      "value": -123.892184
+    }
+  },
+  "previously_observed_holdout_report": "Locked test set, evaluated once (685 rows, EUR):\n  rmse: 2520.42   mae: 1285.92   median_ae: 654.31   r2: 0.4085   bias: -123.89\n  spend: true mean 2199.23 / predicted mean 2075.34\n\nError by true-spend quartile:\n                     rows      mae     bias\nband                                       \n(3.689, 381.03]       172   846.09   844.91\n(381.03, 1053.62]     171   597.74   544.94\n(1053.62, 2577.87]    171   628.06    81.20\n(2577.87, 25654.33]   171  3074.36 -1972.28\n\nPrediction range (EUR): 233.6110958533882 to 9086.822827564212\n",
+  "config_semantic_sha256": "374816889301b4c89de73ef305c0cdcbcd6a7cfcf75f756d808eaa76f1ffbb1e",
+  "data_normalized_sha256": {
+    "train_path": "e8598a3402d81ce72966a4585dde79483be779be25542daf47d7a28fa7adc5a5",
+    "clientes_path": "a2728544cd85f83859ab164199c65bc16601384f8f687e84a76d37409f255740"
+  }
+}

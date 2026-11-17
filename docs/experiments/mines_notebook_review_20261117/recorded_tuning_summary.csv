@@ -1,0 +1,7 @@
+model,untuned,best trial (optimistic),nested CV (honest),nested std,tuned minus untuned
+random_forest,1937.329,1933.62,1947.916,226.187,10.587
+ridge,2032.619,1985.977,1987.897,214.001,-44.722
+hist_gradient_boosting,2024.789,1945.037,1998.962,226.393,-25.827
+xgboost,2018.916,1949.29,2041.285,202.594,22.368
+gradient_boosting,2030.689,2004.648,2048.56,237.471,17.871
+decision_tree,2461.816,2018.284,2068.582,223.716,-393.234

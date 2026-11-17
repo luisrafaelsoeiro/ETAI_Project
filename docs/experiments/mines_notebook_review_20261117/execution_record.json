@@ -1,0 +1,60 @@
+{
+  "review_date": "2026-11-17",
+  "branch": "data-exploration",
+  "base_commit": "93c3975154b98656b51bae21113154f584240d89",
+  "execution": {
+    "exploration": "91 code cells, clean kernel, all completed",
+    "regression_fresh_cells_zero_based": [
+      3,
+      4,
+      21,
+      36,
+      37,
+      39,
+      24
+    ],
+    "nested_search": "Not rerun; labelled published aggregate results retained at original display precision",
+    "permutation": "Fresh fixed-parameter fold fits; one permutation per feature/fold; frozen history context; preserved dtypes",
+    "holdout": "Previously observed in published run; fresh prediction only, scoring disabled"
+  },
+  "fixed_selected_params": {
+    "model__n_estimators": 234,
+    "model__max_depth": 16,
+    "model__min_samples_leaf": 11,
+    "model__max_features": 1.0
+  },
+  "config_semantic_sha256": "374816889301b4c89de73ef305c0cdcbcd6a7cfcf75f756d808eaa76f1ffbb1e",
+  "data_normalized_sha256": {
+    "train_path": "e8598a3402d81ce72966a4585dde79483be779be25542daf47d7a28fa7adc5a5",
+    "clientes_path": "a2728544cd85f83859ab164199c65bc16601384f8f687e84a76d37409f255740"
+  },
+  "python": "3.11.2",
+  "packages": {
+    "pandas": "2.3.3",
+    "numpy": "2.4.6",
+    "scikit-learn": "1.7.2",
+    "matplotlib": "3.10.6",
+    "seaborn": "0.12.2",
+    "optuna": "5.0.0",
+    "category-encoders": "2.11.2",
+    "nbclient": "0.11.0"
+  },
+  "verification": [
+    "exploration.ipynb: valid notebook; code compiles; no saved errors/placeholders; TOC links resolve",
+    "notebooks/08_regression_modelling.ipynb: valid notebook; code compiles; no saved errors/placeholders; TOC links resolve",
+    "Exploration: 91/91 code cells executed from a clean kernel; Checks passed: targets preserved, IDs/targets excluded from predictor screens, rows retained.",
+    "Score helper preserves positive EUR errors and rejects negative errors",
+    "Permutation: 37 predictors \u00d7 5 folds, finite errors, no lookup IDs/dates; dtype assertions passed during execution",
+    "Published aggregate error signs/ranking verified; no new nested-CV training claimed",
+    "requirements.txt: package requirements parse; merge conflict resolved",
+    "Existing suite: python tests/test_pipeline.py completed, 34/34 passed",
+    "Changed diagnostic plots visually inspected"
+  ],
+  "artifact_sha256": {
+    "permutation_by_fold.csv": "478bcda452bfe3ab6e5a6ce3777d95ff547a76a0da951fbe26453d14eff68811",
+    "permutation_summary.csv": "d4fcd0834306998654091a672c48e5e21fa23697cbea44a0a776723784579ace",
+    "recorded_nested_comparison.csv": "3b27e9b1244e7e450f9001a0c67fdaa2884cd21ec2d9a81a59183c715b698f44",
+    "recorded_regression_results.json": "d196bb02038e0df069e604b77b5fa8fac7633b9cb4477277d560ffce075cc5f0",
+    "recorded_tuning_summary.csv": "ee13ce057be0f3259c590dca3a3c3d2a092e478c43dff9e46b6d28af5c145cd8"
+  }
+}
