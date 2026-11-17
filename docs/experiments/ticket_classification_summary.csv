@@ -1,0 +1,4 @@
+task,variant,metric,mean_score,fold_std,seeds,mean_advantage,std_difference,min_advantage,max_advantage,folds_a_better,folds_tied,n_folds,consistent_gain
+classification,no ticket feature,accuracy,0.7095049087119301,0.016838397920263908,1,0.0,0.0,0.0,0.0,0,5,5,False
+classification,+ legacy net / historical mean,accuracy,0.7102206140238321,0.018972474606192925,1,0.0007157053119021262,0.002615338830805002,-0.002389486260453988,0.004773269689737569,2,2,5,False
+classification,+ tax-inclusive ticket / historical mean,accuracy,0.7097427167717413,0.01865972384042531,1,0.00023780805981130638,0.0027220578566837265,-0.002389486260453988,0.004773269689737569,1,2,5,False

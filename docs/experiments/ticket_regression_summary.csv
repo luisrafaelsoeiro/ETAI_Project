@@ -1,0 +1,4 @@
+task,variant,metric,mean_score,fold_std,seeds,mean_advantage,std_difference,min_advantage,max_advantage,folds_a_better,folds_tied,n_folds,consistent_gain
+regression,no ticket feature,rmse,1938.5398707063941,163.08544377663173,3,0.0,0.0,-0.0,-0.0,0,5,5,False
+regression,+ legacy net / historical mean,rmse,1938.7122087244438,164.28296958764918,3,-0.1723380180499589,2.5169131414124526,-3.5076737070749004,2.3454224201022953,3,0,5,False
+regression,+ tax-inclusive ticket / historical mean,rmse,1938.645570348399,163.65512210812705,3,-0.10569964200499271,1.7764316009929784,-2.9983579354784524,1.328755183952353,3,0,5,False

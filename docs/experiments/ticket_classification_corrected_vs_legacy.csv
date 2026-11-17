@@ -1,0 +1,2 @@
+task,seed,mean_advantage,std_difference,min_advantage,max_advantage,folds_a_better,folds_tied,n_folds,consistent_gain
+classification,42,-0.0004778972520908198,0.0006543877628496873,-0.0011947431302270495,0.0,0,3,5,False

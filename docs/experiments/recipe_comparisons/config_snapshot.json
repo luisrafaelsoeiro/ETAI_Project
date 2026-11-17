@@ -1,0 +1,1130 @@
+{
+  "data": {
+    "train_path": "data/raw/train.csv",
+    "test_path": "data/raw/test.csv",
+    "clientes_path": "data/raw/clientes.csv",
+    "sample_submission_path": "data/raw/sample_submission.csv",
+    "id_column": "id",
+    "submission_id_column": "ID",
+    "group_column": "customer_id",
+    "date_column": "purchase_date",
+    "target_columns": [
+      "repeat_purchase_90d",
+      "spend_next_90d"
+    ],
+    "extras_columns": [
+      "id",
+      "customer_id",
+      "purchase_date"
+    ],
+    "drop_columns": [
+      "random_noise"
+    ]
+  },
+  "schema": {
+    "required_columns": [
+      "id",
+      "customer_id",
+      "purchase_date",
+      "total_payable",
+      "gross_total",
+      "net_total",
+      "total_tax",
+      "shipping_cost",
+      "global_discount_total",
+      "line_discount_total",
+      "cost",
+      "line_item_count",
+      "invoice_count_current_purchase",
+      "days_since_previous_purchase",
+      "customer_tenure_days",
+      "prior_purchase_count",
+      "prior_total_spend",
+      "prior_mean_purchase_value",
+      "prior_std_purchase_value",
+      "prior_min_purchase_value",
+      "prior_max_purchase_value",
+      "prior_mean_gap_days",
+      "prior_std_gap_days",
+      "purchase_count_30d",
+      "spend_30d",
+      "purchase_count_90d",
+      "spend_90d",
+      "purchase_count_180d",
+      "spend_180d",
+      "purchase_count_365d",
+      "spend_365d",
+      "payment_type",
+      "salesperson",
+      "commercial_zone",
+      "transport_method",
+      "warehouse",
+      "document_series"
+    ],
+    "optional_columns": [
+      "repeat_purchase_90d",
+      "spend_next_90d",
+      "random_noise"
+    ],
+    "expected_types": {
+      "numeric": [
+        "id",
+        "customer_id",
+        "total_payable",
+        "gross_total",
+        "net_total",
+        "total_tax",
+        "shipping_cost",
+        "global_discount_total",
+        "line_discount_total",
+        "cost",
+        "line_item_count",
+        "invoice_count_current_purchase",
+        "days_since_previous_purchase",
+        "customer_tenure_days",
+        "prior_purchase_count",
+        "prior_total_spend",
+        "prior_mean_purchase_value",
+        "prior_std_purchase_value",
+        "prior_min_purchase_value",
+        "prior_max_purchase_value",
+        "prior_mean_gap_days",
+        "prior_std_gap_days",
+        "purchase_count_30d",
+        "spend_30d",
+        "purchase_count_90d",
+        "spend_90d",
+        "purchase_count_180d",
+        "spend_180d",
+        "purchase_count_365d",
+        "spend_365d",
+        "repeat_purchase_90d",
+        "spend_next_90d",
+        "random_noise"
+      ],
+      "integer": [
+        "id",
+        "customer_id",
+        "line_item_count",
+        "invoice_count_current_purchase",
+        "customer_tenure_days",
+        "prior_purchase_count",
+        "purchase_count_30d",
+        "purchase_count_90d",
+        "purchase_count_180d",
+        "purchase_count_365d",
+        "repeat_purchase_90d"
+      ],
+      "date": [
+        "purchase_date"
+      ]
+    },
+    "ranges": {
+      "purchase_date": {
+        "min": "2010-01-01",
+        "max": "today"
+      },
+      "line_item_count": {
+        "min": 1
+      },
+      "invoice_count_current_purchase": {
+        "min": 1
+      },
+      "repeat_purchase_90d": {
+        "min": 0,
+        "max": 1
+      },
+      "spend_next_90d": {
+        "min": 0
+      }
+    },
+    "allowed_categories": {
+      "payment_type": "Maybe Tomorrow Payment \\d+",
+      "salesperson": "VLOOKUP Master \\d+",
+      "commercial_zone": "Decorative Dashboard Zone \\d+",
+      "transport_method": "Maybe Tomorrow Delivery \\d+",
+      "warehouse": "Final Excel Warehouse \\d+",
+      "document_series": "Ctrl Z Series \\d+"
+    }
+  },
+  "diagnostics": {
+    "date_column": "purchase_date",
+    "column_renames": {
+      "Total a Pagar": "total_payable",
+      "Total Bruto": "gross_total",
+      "Total Liquido": "net_total",
+      "Total Imp_": "total_tax",
+      "Total Portes": "shipping_cost",
+      "Total Desc_ Global": "global_discount_total",
+      "Total Desc_ Linha": "line_discount_total",
+      "Custo": "cost",
+      "N_ Detalhes": "line_item_count"
+    },
+    "placeholder_tokens": [
+      "",
+      "-",
+      "--",
+      "?",
+      "N/A",
+      "NA",
+      "n/a",
+      "na",
+      "null",
+      "NULL",
+      "None",
+      "none",
+      "nan",
+      "NaN",
+      "missing",
+      "Missing",
+      "unknown",
+      "Unknown"
+    ],
+    "non_negative_columns": [
+      "total_payable",
+      "gross_total",
+      "net_total",
+      "total_tax",
+      "shipping_cost",
+      "global_discount_total",
+      "line_discount_total",
+      "cost",
+      "line_item_count",
+      "invoice_count_current_purchase",
+      "days_since_previous_purchase",
+      "customer_tenure_days",
+      "prior_purchase_count",
+      "prior_total_spend",
+      "prior_mean_purchase_value",
+      "prior_std_purchase_value",
+      "prior_min_purchase_value",
+      "prior_max_purchase_value",
+      "prior_mean_gap_days",
+      "prior_std_gap_days",
+      "purchase_count_30d",
+      "spend_30d",
+      "purchase_count_90d",
+      "spend_90d",
+      "purchase_count_180d",
+      "spend_180d",
+      "purchase_count_365d",
+      "spend_365d"
+    ],
+    "placeholder_values": [
+      1000000000
+    ],
+    "placeholder_columns": [
+      "prior_mean_purchase_value",
+      "spend_365d"
+    ],
+    "consistency_rules": [
+      {
+        "rule": "abs(gross_total - line_discount_total - global_discount_total - net_total) <= 0.05"
+      },
+      {
+        "rule": "abs(net_total + total_tax - total_payable) <= 0.05"
+      },
+      {
+        "rule": "purchase_count_30d <= purchase_count_90d"
+      },
+      {
+        "rule": "purchase_count_90d <= purchase_count_180d"
+      },
+      {
+        "rule": "purchase_count_180d <= purchase_count_365d"
+      },
+      {
+        "rule": "purchase_count_365d <= prior_purchase_count"
+      },
+      {
+        "rule": "spend_30d <= spend_90d + 0.01"
+      },
+      {
+        "rule": "spend_90d <= spend_180d + 0.01"
+      },
+      {
+        "rule": "spend_180d <= spend_365d + 0.01"
+      },
+      {
+        "rule": "prior_min_purchase_value <= prior_max_purchase_value + 0.01"
+      },
+      {
+        "rule": "days_since_previous_purchase <= customer_tenure_days + 0.5"
+      },
+      {
+        "rule": "line_item_count >= 1"
+      },
+      {
+        "rule": "invoice_count_current_purchase >= 1"
+      },
+      {
+        "rule": "cost <= net_total"
+      },
+      {
+        "rule": "spend_365d <= prior_total_spend + 0.01",
+        "invalidate": "spend_365d"
+      },
+      {
+        "rule": "abs(prior_mean_purchase_value - prior_total_spend / prior_purchase_count) <= 0.6 + 0.001 * prior_mean_purchase_value",
+        "when": "prior_purchase_count > 0",
+        "invalidate": "prior_mean_purchase_value"
+      },
+      {
+        "rule": "prior_max_purchase_value <= prior_total_spend + 0.01",
+        "when": "prior_purchase_count > 0",
+        "invalidate": "prior_max_purchase_value"
+      },
+      {
+        "rule": "prior_max_purchase_value <= prior_total_spend / prior_purchase_count + prior_std_purchase_value * sqrt(prior_purchase_count - 1) + 0.05",
+        "when": "prior_purchase_count >= 2",
+        "invalidate": "prior_max_purchase_value"
+      },
+      {
+        "rule": "spend_365d >= purchase_count_365d * prior_min_purchase_value - 0.05",
+        "when": "purchase_count_365d >= 0 and purchase_count_365d <= prior_purchase_count",
+        "invalidate": "spend_365d"
+      },
+      {
+        "rule": "spend_365d <= purchase_count_365d * prior_max_purchase_value + 0.05",
+        "when": "purchase_count_365d >= 0 and purchase_count_365d <= prior_purchase_count",
+        "invalidate": "spend_365d"
+      },
+      {
+        "rule": "spend_365d >= spend_180d + (purchase_count_365d - purchase_count_180d) * prior_min_purchase_value - 0.05",
+        "when": "purchase_count_365d >= purchase_count_180d and purchase_count_365d <= prior_purchase_count",
+        "invalidate": "spend_365d"
+      },
+      {
+        "rule": "spend_365d <= spend_180d + (purchase_count_365d - purchase_count_180d) * prior_max_purchase_value + 0.05",
+        "when": "purchase_count_365d >= purchase_count_180d and purchase_count_365d <= prior_purchase_count",
+        "invalidate": "spend_365d"
+      },
+      {
+        "rule": "spend_365d >= prior_total_spend - (prior_purchase_count - purchase_count_365d) * prior_max_purchase_value - 0.05",
+        "when": "purchase_count_365d >= 0 and purchase_count_365d <= prior_purchase_count",
+        "invalidate": "spend_365d"
+      },
+      {
+        "rule": "spend_365d <= prior_total_spend - (prior_purchase_count - purchase_count_365d) * prior_min_purchase_value + 0.05",
+        "when": "purchase_count_365d >= 0 and purchase_count_365d <= prior_purchase_count",
+        "invalidate": "spend_365d"
+      }
+    ],
+    "recompute_rules": [
+      {
+        "column": "prior_mean_purchase_value",
+        "expression": "prior_total_spend / prior_purchase_count",
+        "when": "prior_purchase_count > 0"
+      },
+      {
+        "column": "days_since_previous_purchase",
+        "expression": "customer_tenure_days",
+        "when": "prior_purchase_count == 1"
+      },
+      {
+        "column": "days_since_previous_purchase",
+        "expression": "customer_tenure_days - prior_mean_gap_days * (prior_purchase_count - 1)",
+        "when": "prior_purchase_count >= 2"
+      },
+      {
+        "column": "prior_mean_gap_days",
+        "expression": "(customer_tenure_days - days_since_previous_purchase) / (prior_purchase_count - 1)",
+        "when": "prior_purchase_count >= 2"
+      },
+      {
+        "column": "spend_365d",
+        "expression": "prior_total_spend",
+        "when": "customer_tenure_days <= 365"
+      },
+      {
+        "column": "prior_max_purchase_value",
+        "expression": "prior_total_spend",
+        "when": "prior_purchase_count == 1"
+      },
+      {
+        "column": "prior_min_purchase_value",
+        "expression": "prior_total_spend",
+        "when": "prior_purchase_count == 1"
+      },
+      {
+        "column": "prior_max_purchase_value",
+        "expression": "prior_total_spend - prior_min_purchase_value",
+        "when": "prior_purchase_count == 2"
+      },
+      {
+        "column": "prior_min_purchase_value",
+        "expression": "prior_total_spend - prior_max_purchase_value",
+        "when": "prior_purchase_count == 2"
+      }
+    ],
+    "structural_fill": [
+      {
+        "when": "prior_purchase_count == 0",
+        "value": 0,
+        "columns": [
+          "days_since_previous_purchase",
+          "prior_mean_purchase_value",
+          "prior_min_purchase_value",
+          "prior_max_purchase_value"
+        ]
+      },
+      {
+        "when": "prior_purchase_count < 2",
+        "value": 0,
+        "columns": [
+          "prior_std_purchase_value",
+          "prior_mean_gap_days"
+        ]
+      },
+      {
+        "when": "prior_purchase_count < 3",
+        "value": 0,
+        "columns": [
+          "prior_std_gap_days"
+        ]
+      }
+    ],
+    "flags": {
+      "is_first_purchase": "prior_purchase_count == 0",
+      "has_gap_history": "prior_purchase_count >= 2"
+    },
+    "customer_history": {
+      "use": true,
+      "key": "customer_id",
+      "date_column": "purchase_date",
+      "order_column": "prior_purchase_count",
+      "last_observed_columns": [
+        "payment_type",
+        "salesperson",
+        "transport_method",
+        "warehouse",
+        "commercial_zone",
+        "document_series"
+      ],
+      "previous_purchase_gap": "days_since_previous_purchase"
+    },
+    "date_features": [
+      "month",
+      "weekday"
+    ],
+    "derived_features": {
+      "margin": "net_total - cost",
+      "margin_rate": "(net_total - cost) / net_total",
+      "discount_rate": "(line_discount_total + global_discount_total) / gross_total",
+      "avg_line_value": "net_total / line_item_count",
+      "spend_share_30d": "spend_30d / (spend_365d + 1)",
+      "spend_share_90d": "spend_90d / (spend_365d + 1)",
+      "tax_rate": "total_tax / net_total",
+      "overdue_ratio": "days_since_previous_purchase / prior_mean_gap_days",
+      "purchase_rate": "prior_purchase_count / (customer_tenure_days + 1)",
+      "count_share_90d": "purchase_count_90d / (purchase_count_365d + 1)",
+      "ticket_vs_usual": "(net_total + total_tax) / prior_mean_purchase_value",
+      "spend_trend": "spend_90d - (spend_180d - spend_90d)",
+      "gap_variability": "prior_std_gap_days / prior_mean_gap_days"
+    },
+    "redundant_columns": [
+      "gross_total",
+      "total_payable"
+    ],
+    "almost_empty_preserved_columns": [
+      "id",
+      "customer_id",
+      "repeat_purchase_90d"
+    ]
+  },
+  "customers": {
+    "use": true,
+    "key": "customer_id",
+    "schema": {
+      "required_columns": [
+        "customer_id",
+        "country_or_region",
+        "commercial_region",
+        "island",
+        "municipality",
+        "city",
+        "postal_area",
+        "postal_code",
+        "street",
+        "address",
+        "customer_type",
+        "company_name",
+        "customer_since_year"
+      ],
+      "expected_types": {
+        "numeric": [
+          "customer_id",
+          "customer_since_year"
+        ],
+        "integer": [
+          "customer_id",
+          "customer_since_year"
+        ]
+      },
+      "ranges": {
+        "customer_id": {
+          "min": 1
+        },
+        "customer_since_year": {
+          "min": 1900,
+          "max": "current_year"
+        }
+      },
+      "out_of_range_to_nan": true,
+      "allowed_categories": {
+        "country_or_region": "Country CT\\d+: .+",
+        "commercial_region": "Region RG\\d+: .+",
+        "island": "Island IS\\d+: .+",
+        "municipality": "Municipality MU\\d+: .+",
+        "city": "City CY\\d+: .+",
+        "postal_area": "Postal area PA\\d+: .+",
+        "postal_code": "Postal code PC\\d+: .+",
+        "street": "Street ST\\d+: .+",
+        "address": "Address AD\\d+: .+",
+        "company_name": ".+ \\d+"
+      }
+    },
+    "near_duplicate_columns": [
+      "company_name",
+      "address"
+    ],
+    "code_pattern": "([A-Z]{2}\\d+):",
+    "code_columns": [
+      "country_or_region",
+      "commercial_region",
+      "island",
+      "municipality",
+      "city",
+      "postal_area",
+      "postal_code",
+      "street",
+      "address"
+    ],
+    "profile_columns": [
+      "commercial_region",
+      "municipality",
+      "city",
+      "postal_area",
+      "postal_code",
+      "street"
+    ],
+    "hierarchy_checks": [
+      [
+        "commercial_region",
+        "country_or_region"
+      ],
+      [
+        "island",
+        "commercial_region"
+      ],
+      [
+        "municipality",
+        "commercial_region"
+      ],
+      [
+        "postal_area",
+        "commercial_region"
+      ],
+      [
+        "postal_code",
+        "postal_area"
+      ],
+      [
+        "postal_area",
+        "municipality"
+      ],
+      [
+        "city",
+        "municipality"
+      ]
+    ],
+    "hierarchy_recovery": [
+      {
+        "column": "commercial_region",
+        "from": [
+          "postal_area",
+          "postal_code",
+          "municipality",
+          "city"
+        ]
+      },
+      {
+        "column": "municipality",
+        "from": [
+          "postal_code",
+          "city"
+        ]
+      }
+    ],
+    "structural_fill": {
+      "island": {
+        "parent": "commercial_region",
+        "value": "none"
+      }
+    },
+    "rare_level_backoff": {},
+    "flags": {
+      "customer_since_before_records": "customer_since_year <= 2015"
+    },
+    "columns": [
+      "country_or_region",
+      "commercial_region",
+      "island",
+      "municipality",
+      "profile_completeness",
+      "customer_since_before_records",
+      "customer_since_year"
+    ],
+    "derived_features": {
+      "years_as_customer": "purchase_date.dt.year - customer_since_year"
+    },
+    "consistency_rules": [
+      {
+        "rule": "years_as_customer >= 0",
+        "invalidate": "years_as_customer"
+      }
+    ],
+    "drop_after_derive": [
+      "customer_since_year"
+    ]
+  },
+  "dtypes": {
+    "Int8": [
+      "repeat_purchase_90d"
+    ],
+    "Int16": [
+      "line_item_count",
+      "invoice_count_current_purchase",
+      "customer_tenure_days",
+      "prior_purchase_count",
+      "purchase_count_30d",
+      "purchase_count_90d",
+      "purchase_count_180d",
+      "purchase_count_365d",
+      "purchase_month",
+      "purchase_weekday",
+      "years_as_customer",
+      "profile_completeness",
+      "customer_since_before_records"
+    ],
+    "Int32": [
+      "id",
+      "customer_id"
+    ],
+    "category": [
+      "payment_type",
+      "salesperson",
+      "commercial_zone",
+      "transport_method",
+      "warehouse",
+      "document_series",
+      "country_or_region",
+      "commercial_region",
+      "island",
+      "municipality"
+    ]
+  },
+  "test_set": {
+    "strategy": "temporal",
+    "size": 0.2,
+    "gap_days": 90,
+    "random_state": 42,
+    "evaluate": false,
+    "refit_on_all_rows": false
+  },
+  "cv": {
+    "n_splits": 5,
+    "gap_days": 90
+  },
+  "preprocessing": {
+    "numeric_features": [
+      "net_total",
+      "total_tax",
+      "shipping_cost",
+      "global_discount_total",
+      "line_discount_total",
+      "cost",
+      "line_item_count",
+      "invoice_count_current_purchase",
+      "days_since_previous_purchase",
+      "customer_tenure_days",
+      "prior_purchase_count",
+      "prior_total_spend",
+      "prior_mean_purchase_value",
+      "prior_std_purchase_value",
+      "prior_min_purchase_value",
+      "prior_max_purchase_value",
+      "prior_mean_gap_days",
+      "prior_std_gap_days",
+      "purchase_count_30d",
+      "spend_30d",
+      "purchase_count_90d",
+      "spend_90d",
+      "purchase_count_180d",
+      "spend_180d",
+      "purchase_count_365d",
+      "spend_365d"
+    ],
+    "categorical_features": [
+      "payment_type",
+      "salesperson",
+      "commercial_zone",
+      "transport_method",
+      "warehouse",
+      "document_series"
+    ],
+    "flag_features": [
+      "is_first_purchase",
+      "has_gap_history"
+    ],
+    "mnar_indicator_sources": [
+      "spend_365d"
+    ],
+    "imputation": {
+      "numeric_strategy": "median",
+      "categorical_strategy": "most_frequent",
+      "fit_rows": {
+        "spend_365d": "prior_purchase_count > 0",
+        "prior_max_purchase_value": "prior_purchase_count > 0"
+      },
+      "column_imputers": {},
+      "row_bounds": {
+        "prior_max_purchase_value": {
+          "min": [
+            "prior_mean_purchase_value",
+            "spend_365d / purchase_count_365d",
+            "(spend_365d - spend_180d) / (purchase_count_365d - purchase_count_180d)",
+            "(prior_total_spend - spend_365d) / (prior_purchase_count - purchase_count_365d)"
+          ],
+          "max": [
+            "prior_total_spend - (prior_purchase_count - 1) * prior_min_purchase_value",
+            "prior_mean_purchase_value + prior_std_purchase_value * sqrt(abs(prior_purchase_count - 1))"
+          ]
+        },
+        "spend_365d": {
+          "min": [
+            "spend_180d",
+            "purchase_count_365d * prior_min_purchase_value",
+            "spend_180d + (purchase_count_365d - purchase_count_180d) * prior_min_purchase_value",
+            "prior_total_spend - (prior_purchase_count - purchase_count_365d) * prior_max_purchase_value"
+          ],
+          "max": [
+            "prior_total_spend",
+            "purchase_count_365d * prior_max_purchase_value",
+            "spend_180d + (purchase_count_365d - purchase_count_180d) * prior_max_purchase_value",
+            "prior_total_spend - (prior_purchase_count - purchase_count_365d) * prior_min_purchase_value"
+          ]
+        },
+        "days_since_previous_purchase": {
+          "max": "customer_tenure_days"
+        },
+        "prior_mean_gap_days": {
+          "max": "customer_tenure_days"
+        }
+      }
+    },
+    "rare_category_min_count": 0,
+    "encoder": "target",
+    "scaler": "robust",
+    "exclude_features": [
+      "global_discount_total",
+      "commercial_zone",
+      "warehouse"
+    ],
+    "selection": {
+      "method": "none"
+    },
+    "random_state": 42
+  },
+  "classification": {
+    "target": "repeat_purchase_90d",
+    "metrics": [
+      "accuracy",
+      "f1",
+      "roc_auc"
+    ],
+    "selection_metric": "accuracy",
+    "comparison_model": {
+      "type": "logistic_regression",
+      "params": {
+        "max_iter": 2000
+      }
+    },
+    "candidate_models": [
+      {
+        "type": "dummy",
+        "params": {
+          "strategy": "most_frequent"
+        }
+      },
+      {
+        "type": "logistic_regression",
+        "params": {
+          "max_iter": 2000
+        }
+      },
+      {
+        "type": "decision_tree",
+        "params": {
+          "max_depth": 5,
+          "random_state": 42
+        }
+      },
+      {
+        "type": "random_forest",
+        "params": {
+          "n_estimators": 300,
+          "min_samples_leaf": 5,
+          "n_jobs": -1,
+          "random_state": 42
+        }
+      }
+    ],
+    "preprocessing": {
+      "encoder": "target",
+      "scaler": "standard",
+      "exclude_features": [
+        "document_series",
+        "shipping_cost",
+        "invoice_count_current_purchase"
+      ]
+    },
+    "model": {
+      "type": "logistic_regression",
+      "params": {
+        "max_iter": 2000
+      }
+    },
+    "tuning": {
+      "enabled": false,
+      "n_trials": 30,
+      "inner_splits": 3,
+      "random_state": 42,
+      "search_spaces": {
+        "logistic_regression": {
+          "model__C": {
+            "type": "float",
+            "low": 0.0001,
+            "high": 100.0,
+            "log": true
+          },
+          "model__class_weight": {
+            "type": "categorical",
+            "choices": [
+              null,
+              "balanced"
+            ]
+          }
+        },
+        "decision_tree": {
+          "model__max_depth": {
+            "type": "int",
+            "low": 2,
+            "high": 12
+          },
+          "model__min_samples_leaf": {
+            "type": "int",
+            "low": 1,
+            "high": 100,
+            "log": true
+          }
+        },
+        "random_forest": {
+          "model__n_estimators": {
+            "type": "int",
+            "low": 100,
+            "high": 500
+          },
+          "model__max_depth": {
+            "type": "categorical",
+            "choices": [
+              null,
+              5,
+              8,
+              12,
+              16
+            ]
+          },
+          "model__min_samples_leaf": {
+            "type": "int",
+            "low": 1,
+            "high": 50,
+            "log": true
+          },
+          "model__max_features": {
+            "type": "categorical",
+            "choices": [
+              "sqrt",
+              "log2",
+              1.0
+            ]
+          }
+        },
+        "hist_gradient_boosting": {
+          "model__max_iter": {
+            "type": "int",
+            "low": 50,
+            "high": 500,
+            "log": true
+          },
+          "model__learning_rate": {
+            "type": "float",
+            "low": 0.01,
+            "high": 0.3,
+            "log": true
+          },
+          "model__max_leaf_nodes": {
+            "type": "int",
+            "low": 4,
+            "high": 64,
+            "log": true
+          },
+          "model__min_samples_leaf": {
+            "type": "int",
+            "low": 5,
+            "high": 200,
+            "log": true
+          }
+        },
+        "xgboost": {
+          "model__n_estimators": {
+            "type": "int",
+            "low": 50,
+            "high": 600,
+            "log": true
+          },
+          "model__learning_rate": {
+            "type": "float",
+            "low": 0.01,
+            "high": 0.3,
+            "log": true
+          },
+          "model__max_depth": {
+            "type": "int",
+            "low": 1,
+            "high": 8
+          },
+          "model__subsample": {
+            "type": "float",
+            "low": 0.5,
+            "high": 1.0
+          },
+          "model__colsample_bytree": {
+            "type": "float",
+            "low": 0.5,
+            "high": 1.0
+          }
+        }
+      }
+    }
+  },
+  "regression": {
+    "target": "spend_next_90d",
+    "row_filter": "repeat_purchase_90d == 1 and spend_next_90d.notna()",
+    "metrics": [
+      "rmse",
+      "mae",
+      "r2"
+    ],
+    "selection_metric": "rmse",
+    "comparison_model": {
+      "type": "ridge",
+      "params": {
+        "alpha": 1.0
+      }
+    },
+    "candidate_models": [
+      {
+        "type": "dummy",
+        "params": {
+          "strategy": "mean"
+        }
+      },
+      {
+        "type": "ridge",
+        "params": {
+          "alpha": 1.0
+        }
+      },
+      {
+        "type": "decision_tree",
+        "params": {
+          "max_depth": 5,
+          "random_state": 42
+        }
+      },
+      {
+        "type": "random_forest",
+        "params": {
+          "n_estimators": 300,
+          "min_samples_leaf": 5,
+          "n_jobs": -1,
+          "random_state": 42
+        }
+      }
+    ],
+    "preprocessing": {
+      "encoder": "target",
+      "scaler": "minmax",
+      "extra_numeric_features": [
+        "purchase_month",
+        "purchase_weekday",
+        "years_as_customer",
+        "profile_completeness",
+        "customer_since_before_records"
+      ],
+      "extra_categorical_features": [
+        "country_or_region",
+        "commercial_region",
+        "island",
+        "municipality"
+      ],
+      "exclude_features": [
+        "cost",
+        "country_or_region",
+        "customer_since_before_records"
+      ],
+      "imputation": {
+        "categorical_strategy": "constant",
+        "categorical_fill_value": "Missing",
+        "column_imputers": {
+          "spend_365d": {
+            "strategy": "formula",
+            "expression": "purchase_count_365d * prior_mean_purchase_value"
+          }
+        }
+      }
+    },
+    "model": {
+      "type": "random_forest",
+      "params": {
+        "n_estimators": 300,
+        "min_samples_leaf": 5,
+        "n_jobs": -1,
+        "random_state": 42
+      },
+      "target_transform": "none"
+    },
+    "tuning": {
+      "enabled": false,
+      "n_trials": 30,
+      "inner_splits": 3,
+      "random_state": 42,
+      "search_spaces": {
+        "ridge": {
+          "model__alpha": {
+            "type": "float",
+            "low": 0.001,
+            "high": 100.0,
+            "log": true
+          }
+        },
+        "decision_tree": {
+          "model__max_depth": {
+            "type": "int",
+            "low": 2,
+            "high": 12
+          },
+          "model__min_samples_leaf": {
+            "type": "int",
+            "low": 1,
+            "high": 100,
+            "log": true
+          }
+        },
+        "random_forest": {
+          "model__n_estimators": {
+            "type": "int",
+            "low": 100,
+            "high": 500
+          },
+          "model__max_depth": {
+            "type": "categorical",
+            "choices": [
+              null,
+              5,
+              8,
+              12,
+              16
+            ]
+          },
+          "model__min_samples_leaf": {
+            "type": "int",
+            "low": 1,
+            "high": 50,
+            "log": true
+          },
+          "model__max_features": {
+            "type": "categorical",
+            "choices": [
+              "sqrt",
+              "log2",
+              1.0
+            ]
+          }
+        },
+        "hist_gradient_boosting": {
+          "model__max_iter": {
+            "type": "int",
+            "low": 50,
+            "high": 500,
+            "log": true
+          },
+          "model__learning_rate": {
+            "type": "float",
+            "low": 0.01,
+            "high": 0.3,
+            "log": true
+          },
+          "model__max_leaf_nodes": {
+            "type": "int",
+            "low": 4,
+            "high": 64,
+            "log": true
+          },
+          "model__min_samples_leaf": {
+            "type": "int",
+            "low": 5,
+            "high": 200,
+            "log": true
+          }
+        },
+        "xgboost": {
+          "model__n_estimators": {
+            "type": "int",
+            "low": 50,
+            "high": 600,
+            "log": true
+          },
+          "model__learning_rate": {
+            "type": "float",
+            "low": 0.01,
+            "high": 0.3,
+            "log": true
+          },
+          "model__max_depth": {
+            "type": "int",
+            "low": 1,
+            "high": 8
+          },
+          "model__subsample": {
+            "type": "float",
+            "low": 0.5,
+            "high": 1.0
+          },
+          "model__colsample_bytree": {
+            "type": "float",
+            "low": 0.5,
+            "high": 1.0
+          }
+        }
+      }
+    }
+  },
+  "output": {
+    "results_dir": "results",
+    "scoreboard": "results/runs.csv",
+    "predictions_dir": "results/predictions",
+    "models_dir": "models"
+  }
+}

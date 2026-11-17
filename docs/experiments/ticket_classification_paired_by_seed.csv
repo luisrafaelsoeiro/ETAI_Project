@@ -1,0 +1,4 @@
+task,variant,reference,seed,mean_advantage,std_difference,min_advantage,max_advantage,folds_a_better,folds_tied,n_folds,consistent_gain
+classification,no ticket feature,no ticket feature,42,0.0,0.0,0.0,0.0,0,5,5,False
+classification,+ legacy net / historical mean,no ticket feature,42,0.0007157053119021262,0.002615338830805002,-0.002389486260453988,0.004773269689737569,2,2,5,False
+classification,+ tax-inclusive ticket / historical mean,no ticket feature,42,0.00023780805981130638,0.0027220578566837265,-0.002389486260453988,0.004773269689737569,1,2,5,False

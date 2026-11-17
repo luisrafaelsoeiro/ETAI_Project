@@ -1,0 +1,5 @@
+task,variant,reference,seed,mean_advantage,std_difference,min_advantage,max_advantage,folds_a_better,folds_tied,n_folds,consistent_gain
+classification,history + mode,history + mode,42,0.0,0.0,0.0,0.0,0,5,5,False
+classification,history + Missing,history + mode,42,0.0026275794618238367,0.0025897474829031752,-0.0011947431302269385,0.005973715651135025,4,0,5,False
+classification,no category history + mode,history + mode,42,0.0007151350287850633,0.004593267384942732,-0.004778972520908087,0.007159904534606243,3,0,5,False
+classification,no category history + Missing,history + mode,42,0.000954653937947536,0.0033136340879319046,-0.0035842293906810374,0.004773269689737569,3,0,5,False

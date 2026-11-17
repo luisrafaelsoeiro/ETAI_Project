@@ -1,1 +1,11 @@
+<<<<<<< HEAD
 .venv/**
+=======
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+models/
+results/
+.ipynb_checkpoints/
+>>>>>>> 3fe189f9713e9fdba7bfe059751133656e656c0b

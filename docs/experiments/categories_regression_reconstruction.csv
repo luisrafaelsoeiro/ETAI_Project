@@ -1,0 +1,13 @@
+task,variant,column,masked,correct,history_available,history_correct,accuracy,history_coverage,history_accuracy_when_available
+regression,history + mode,payment_type,212,186,171,164,0.8773584905660378,0.8066037735849056,0.9590643274853801
+regression,history + mode,salesperson,212,187,170,162,0.8820754716981132,0.8018867924528302,0.9529411764705882
+regression,history + mode,transport_method,213,130,181,129,0.6103286384976526,0.8497652582159625,0.712707182320442
+regression,history + Missing,payment_type,212,164,171,164,0.7735849056603774,0.8066037735849056,0.9590643274853801
+regression,history + Missing,salesperson,212,162,170,162,0.7641509433962265,0.8018867924528302,0.9529411764705882
+regression,history + Missing,transport_method,213,129,181,129,0.6056338028169014,0.8497652582159625,0.712707182320442
+regression,no category history + mode,payment_type,212,148,0,0,0.6981132075471698,0.0,
+regression,no category history + mode,salesperson,212,165,0,0,0.7783018867924528,0.0,
+regression,no category history + mode,transport_method,213,29,0,0,0.13615023474178403,0.0,
+regression,no category history + Missing,payment_type,212,0,0,0,0.0,0.0,
+regression,no category history + Missing,salesperson,212,0,0,0,0.0,0.0,
+regression,no category history + Missing,transport_method,213,0,0,0,0.0,0.0,

@@ -1,0 +1,211 @@
+task,seed,imputer,fold,metric,score
+classification,42,median,1,accuracy,0.7219570405727923
+classification,42,median,2,accuracy,0.7025089605734767
+classification,42,median,3,accuracy,0.6833930704898447
+classification,42,median,4,accuracy,0.7240143369175627
+classification,42,median,5,accuracy,0.7156511350059738
+classification,42,KNN k=3 uniform,1,accuracy,0.7219570405727923
+classification,42,KNN k=3 uniform,2,accuracy,0.7060931899641577
+classification,42,KNN k=3 uniform,3,accuracy,0.6857825567502986
+classification,42,KNN k=3 uniform,4,accuracy,0.7252090800477897
+classification,42,KNN k=3 uniform,5,accuracy,0.7192353643966547
+classification,42,KNN k=3 distance,1,accuracy,0.7219570405727923
+classification,42,KNN k=3 distance,2,accuracy,0.7060931899641577
+classification,42,KNN k=3 distance,3,accuracy,0.6857825567502986
+classification,42,KNN k=3 distance,4,accuracy,0.7252090800477897
+classification,42,KNN k=3 distance,5,accuracy,0.7168458781362007
+classification,42,KNN k=5 uniform,1,accuracy,0.7219570405727923
+classification,42,KNN k=5 uniform,2,accuracy,0.7072879330943848
+classification,42,KNN k=5 uniform,3,accuracy,0.6845878136200717
+classification,42,KNN k=5 uniform,4,accuracy,0.7240143369175627
+classification,42,KNN k=5 uniform,5,accuracy,0.7168458781362007
+classification,42,KNN k=5 distance,1,accuracy,0.7219570405727923
+classification,42,KNN k=5 distance,2,accuracy,0.7072879330943848
+classification,42,KNN k=5 distance,3,accuracy,0.6845878136200717
+classification,42,KNN k=5 distance,4,accuracy,0.7240143369175627
+classification,42,KNN k=5 distance,5,accuracy,0.7168458781362007
+classification,42,KNN k=10 uniform,1,accuracy,0.7219570405727923
+classification,42,KNN k=10 uniform,2,accuracy,0.7060931899641577
+classification,42,KNN k=10 uniform,3,accuracy,0.6845878136200717
+classification,42,KNN k=10 uniform,4,accuracy,0.7228195937873357
+classification,42,KNN k=10 uniform,5,accuracy,0.7168458781362007
+classification,42,KNN k=10 distance,1,accuracy,0.7219570405727923
+classification,42,KNN k=10 distance,2,accuracy,0.7060931899641577
+classification,42,KNN k=10 distance,3,accuracy,0.6845878136200717
+classification,42,KNN k=10 distance,4,accuracy,0.7228195937873357
+classification,42,KNN k=10 distance,5,accuracy,0.7156511350059738
+classification,42,KNN k=20 uniform,1,accuracy,0.7219570405727923
+classification,42,KNN k=20 uniform,2,accuracy,0.7037037037037037
+classification,42,KNN k=20 uniform,3,accuracy,0.6845878136200717
+classification,42,KNN k=20 uniform,4,accuracy,0.7228195937873357
+classification,42,KNN k=20 uniform,5,accuracy,0.7168458781362007
+classification,42,KNN k=20 distance,1,accuracy,0.7219570405727923
+classification,42,KNN k=20 distance,2,accuracy,0.7037037037037037
+classification,42,KNN k=20 distance,3,accuracy,0.6833930704898447
+classification,42,KNN k=20 distance,4,accuracy,0.7240143369175627
+classification,42,KNN k=20 distance,5,accuracy,0.7168458781362007
+regression,42,median,1,rmse,2032.375351846651
+regression,42,median,2,rmse,1930.6711533033772
+regression,42,median,3,rmse,1947.6937206032342
+regression,42,median,4,rmse,2102.7118065887817
+regression,42,median,5,rmse,1654.6502611119215
+regression,42,KNN k=3 uniform,1,rmse,2032.3066497286025
+regression,42,KNN k=3 uniform,2,rmse,1930.420548467464
+regression,42,KNN k=3 uniform,3,rmse,1947.745150969393
+regression,42,KNN k=3 uniform,4,rmse,2100.58828332751
+regression,42,KNN k=3 uniform,5,rmse,1654.3259125931204
+regression,42,KNN k=3 distance,1,rmse,2032.3066497286025
+regression,42,KNN k=3 distance,2,rmse,1930.420288302178
+regression,42,KNN k=3 distance,3,rmse,1947.7451509693933
+regression,42,KNN k=3 distance,4,rmse,2100.588749847393
+regression,42,KNN k=3 distance,5,rmse,1654.4141227264852
+regression,42,KNN k=5 uniform,1,rmse,2032.318026164037
+regression,42,KNN k=5 uniform,2,rmse,1931.0373913365343
+regression,42,KNN k=5 uniform,3,rmse,1947.7938005544077
+regression,42,KNN k=5 uniform,4,rmse,2103.2181460739184
+regression,42,KNN k=5 uniform,5,rmse,1653.7855954108586
+regression,42,KNN k=5 distance,1,rmse,2032.318026164037
+regression,42,KNN k=5 distance,2,rmse,1931.0646993116147
+regression,42,KNN k=5 distance,3,rmse,1947.79443028284
+regression,42,KNN k=5 distance,4,rmse,2100.8197047633835
+regression,42,KNN k=5 distance,5,rmse,1653.6973266804896
+regression,42,KNN k=10 uniform,1,rmse,2032.3259706605515
+regression,42,KNN k=10 uniform,2,rmse,1931.3437450782606
+regression,42,KNN k=10 uniform,3,rmse,1947.7495752289553
+regression,42,KNN k=10 uniform,4,rmse,2101.0437233172247
+regression,42,KNN k=10 uniform,5,rmse,1654.7204457508524
+regression,42,KNN k=10 distance,1,rmse,2032.316733905694
+regression,42,KNN k=10 distance,2,rmse,1931.279771961462
+regression,42,KNN k=10 distance,3,rmse,1947.747699009611
+regression,42,KNN k=10 distance,4,rmse,2101.0436592610863
+regression,42,KNN k=10 distance,5,rmse,1654.7204457508522
+regression,42,KNN k=20 uniform,1,rmse,2032.3461350859764
+regression,42,KNN k=20 uniform,2,rmse,1930.9824774290255
+regression,42,KNN k=20 uniform,3,rmse,1947.8187530729308
+regression,42,KNN k=20 uniform,4,rmse,2100.7747177347337
+regression,42,KNN k=20 uniform,5,rmse,1654.2835952499943
+regression,42,KNN k=20 distance,1,rmse,2032.3461350859764
+regression,42,KNN k=20 distance,2,rmse,1930.9663946515072
+regression,42,KNN k=20 distance,3,rmse,1947.8187530729308
+regression,42,KNN k=20 distance,4,rmse,2103.2504139624507
+regression,42,KNN k=20 distance,5,rmse,1654.1449554625478
+regression,42,"median, without count x mean",1,rmse,2032.4042998857153
+regression,42,"median, without count x mean",2,rmse,1934.0092844700955
+regression,42,"median, without count x mean",3,rmse,1948.3536887054736
+regression,42,"median, without count x mean",4,rmse,2065.8654701156916
+regression,42,"median, without count x mean",5,rmse,1636.531385429271
+regression,42,"KNN k=5 uniform, without count x mean",1,rmse,2032.4345472509233
+regression,42,"KNN k=5 uniform, without count x mean",2,rmse,1932.1849724017418
+regression,42,"KNN k=5 uniform, without count x mean",3,rmse,1945.308636278763
+regression,42,"KNN k=5 uniform, without count x mean",4,rmse,2072.599734923647
+regression,42,"KNN k=5 uniform, without count x mean",5,rmse,1650.1846312592224
+regression,1,median,1,rmse,2035.1170070976125
+regression,1,median,2,rmse,1938.3112317334105
+regression,1,median,3,rmse,1943.5453517102371
+regression,1,median,4,rmse,2111.773964679974
+regression,1,median,5,rmse,1642.6212030402253
+regression,1,KNN k=3 uniform,1,rmse,2034.9663542023068
+regression,1,KNN k=3 uniform,2,rmse,1938.490522866169
+regression,1,KNN k=3 uniform,3,rmse,1943.6844013743714
+regression,1,KNN k=3 uniform,4,rmse,2111.0508688935456
+regression,1,KNN k=3 uniform,5,rmse,1642.2530208144192
+regression,1,KNN k=3 distance,1,rmse,2034.9663542023068
+regression,1,KNN k=3 distance,2,rmse,1938.4832178772754
+regression,1,KNN k=3 distance,3,rmse,1943.6844013743714
+regression,1,KNN k=3 distance,4,rmse,2111.002697786151
+regression,1,KNN k=3 distance,5,rmse,1642.2396391239422
+regression,1,KNN k=5 uniform,1,rmse,2034.9565072746132
+regression,1,KNN k=5 uniform,2,rmse,1939.057594498321
+regression,1,KNN k=5 uniform,3,rmse,1943.672663218245
+regression,1,KNN k=5 uniform,4,rmse,2111.1884794338066
+regression,1,KNN k=5 uniform,5,rmse,1643.205234632673
+regression,1,KNN k=5 distance,1,rmse,2034.9663542023068
+regression,1,KNN k=5 distance,2,rmse,1939.1167080788593
+regression,1,KNN k=5 distance,3,rmse,1943.672663218245
+regression,1,KNN k=5 distance,4,rmse,2111.1884794338066
+regression,1,KNN k=5 distance,5,rmse,1642.9656715456474
+regression,1,KNN k=10 uniform,1,rmse,2034.9565072746134
+regression,1,KNN k=10 uniform,2,rmse,1939.135151092026
+regression,1,KNN k=10 uniform,3,rmse,1943.5738707178932
+regression,1,KNN k=10 uniform,4,rmse,2111.2947084682796
+regression,1,KNN k=10 uniform,5,rmse,1642.5437735589041
+regression,1,KNN k=10 distance,1,rmse,2034.9565072746134
+regression,1,KNN k=10 distance,2,rmse,1939.1598163712476
+regression,1,KNN k=10 distance,3,rmse,1943.5738707178932
+regression,1,KNN k=10 distance,4,rmse,2111.289607878677
+regression,1,KNN k=10 distance,5,rmse,1642.5511539540312
+regression,1,KNN k=20 uniform,1,rmse,2034.9751407805406
+regression,1,KNN k=20 uniform,2,rmse,1939.1275006571868
+regression,1,KNN k=20 uniform,3,rmse,1943.5684905533055
+regression,1,KNN k=20 uniform,4,rmse,2111.265945093941
+regression,1,KNN k=20 uniform,5,rmse,1642.5504565656324
+regression,1,KNN k=20 distance,1,rmse,2034.9849876180701
+regression,1,KNN k=20 distance,2,rmse,1939.1273642732378
+regression,1,KNN k=20 distance,3,rmse,1943.5690883936156
+regression,1,KNN k=20 distance,4,rmse,2111.262348022654
+regression,1,KNN k=20 distance,5,rmse,1642.4644456538435
+regression,1,"median, without count x mean",1,rmse,2034.9176511249568
+regression,1,"median, without count x mean",2,rmse,1939.608716277368
+regression,1,"median, without count x mean",3,rmse,1940.7352797282194
+regression,1,"median, without count x mean",4,rmse,2067.423799418853
+regression,1,"median, without count x mean",5,rmse,1636.942487831389
+regression,1,"KNN k=5 uniform, without count x mean",1,rmse,2034.9956352338047
+regression,1,"KNN k=5 uniform, without count x mean",2,rmse,1939.4922936578541
+regression,1,"KNN k=5 uniform, without count x mean",3,rmse,1938.0467337378586
+regression,1,"KNN k=5 uniform, without count x mean",4,rmse,2080.51773702282
+regression,1,"KNN k=5 uniform, without count x mean",5,rmse,1643.6802113298945
+regression,2,median,1,rmse,2061.5860671985747
+regression,2,median,2,rmse,1947.4681643519352
+regression,2,median,3,rmse,1959.2517618897516
+regression,2,median,4,rmse,2110.279307202648
+regression,2,median,5,rmse,1638.012003842291
+regression,2,KNN k=3 uniform,1,rmse,2061.5013658088933
+regression,2,KNN k=3 uniform,2,rmse,1947.644991104227
+regression,2,KNN k=3 uniform,3,rmse,1959.367679933743
+regression,2,KNN k=3 uniform,4,rmse,2110.177013411858
+regression,2,KNN k=3 uniform,5,rmse,1638.1373431701736
+regression,2,KNN k=3 distance,1,rmse,2061.5013658088933
+regression,2,KNN k=3 distance,2,rmse,1947.6585828539962
+regression,2,KNN k=3 distance,3,rmse,1959.367679933743
+regression,2,KNN k=3 distance,4,rmse,2110.154150147566
+regression,2,KNN k=3 distance,5,rmse,1638.1034203655213
+regression,2,KNN k=5 uniform,1,rmse,2061.4848890497346
+regression,2,KNN k=5 uniform,2,rmse,1948.707575460031
+regression,2,KNN k=5 uniform,3,rmse,1959.3605312212565
+regression,2,KNN k=5 uniform,4,rmse,2109.9821558733715
+regression,2,KNN k=5 uniform,5,rmse,1638.7049221514433
+regression,2,KNN k=5 distance,1,rmse,2061.484889049735
+regression,2,KNN k=5 distance,2,rmse,1948.7057043003838
+regression,2,KNN k=5 distance,3,rmse,1959.3605312212565
+regression,2,KNN k=5 distance,4,rmse,2109.978849152212
+regression,2,KNN k=5 distance,5,rmse,1638.9670450024832
+regression,2,KNN k=10 uniform,1,rmse,2061.4913419439995
+regression,2,KNN k=10 uniform,2,rmse,1948.5871232184925
+regression,2,KNN k=10 uniform,3,rmse,1959.4670068274322
+regression,2,KNN k=10 uniform,4,rmse,2110.043920574485
+regression,2,KNN k=10 uniform,5,rmse,1638.6462639929741
+regression,2,KNN k=10 distance,1,rmse,2061.4913419439995
+regression,2,KNN k=10 distance,2,rmse,1948.5860117356015
+regression,2,KNN k=10 distance,3,rmse,1959.5404420394032
+regression,2,KNN k=10 distance,4,rmse,2110.0463575554018
+regression,2,KNN k=10 distance,5,rmse,1638.6401263300502
+regression,2,KNN k=20 uniform,1,rmse,2061.520504047851
+regression,2,KNN k=20 uniform,2,rmse,1948.606606666677
+regression,2,KNN k=20 uniform,3,rmse,1959.5220909220286
+regression,2,KNN k=20 uniform,4,rmse,2110.290647775711
+regression,2,KNN k=20 uniform,5,rmse,1638.9461502320728
+regression,2,KNN k=20 distance,1,rmse,2061.520504047851
+regression,2,KNN k=20 distance,2,rmse,1948.6137473235701
+regression,2,KNN k=20 distance,3,rmse,1959.5220909220286
+regression,2,KNN k=20 distance,4,rmse,2110.290647775711
+regression,2,KNN k=20 distance,5,rmse,1638.5683826561506
+regression,2,"median, without count x mean",1,rmse,2061.5996305765134
+regression,2,"median, without count x mean",2,rmse,1947.9295382568266
+regression,2,"median, without count x mean",3,rmse,1958.2767419852792
+regression,2,"median, without count x mean",4,rmse,2079.6657451429537
+regression,2,"median, without count x mean",5,rmse,1636.1649519400307
+regression,2,"KNN k=5 uniform, without count x mean",1,rmse,2061.6283789389804
+regression,2,"KNN k=5 uniform, without count x mean",2,rmse,1948.965264312562
+regression,2,"KNN k=5 uniform, without count x mean",3,rmse,1956.3318015359337
+regression,2,"KNN k=5 uniform, without count x mean",4,rmse,2063.011404303884
+regression,2,"KNN k=5 uniform, without count x mean",5,rmse,1638.116886395712

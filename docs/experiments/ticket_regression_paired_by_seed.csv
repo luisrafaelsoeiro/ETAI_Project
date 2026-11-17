@@ -1,0 +1,10 @@
+task,variant,reference,seed,mean_advantage,std_difference,min_advantage,max_advantage,folds_a_better,folds_tied,n_folds,consistent_gain
+regression,no ticket feature,no ticket feature,42,0.0,0.0,-0.0,-0.0,0,5,5,False
+regression,+ legacy net / historical mean,no ticket feature,42,-0.5699169109442664,4.703049476989573,-4.9758110153452435,4.60920363352534,2,0,5,False
+regression,+ tax-inclusive ticket / historical mean,no ticket feature,42,0.2482710215361749,3.4811683455873554,-4.117895577988065,4.585647994558258,2,0,5,False
+regression,no ticket feature,no ticket feature,1,0.0,0.0,-0.0,-0.0,0,5,5,False
+regression,+ legacy net / historical mean,no ticket feature,1,-0.37894154835703375,4.371257312706015,-5.530743530677,4.189484436294379,2,0,5,False
+regression,+ tax-inclusive ticket / historical mean,no ticket feature,1,-1.1413878108540303,4.329295342914985,-6.089294894710292,3.5056012014886164,2,0,5,False
+regression,no ticket feature,no ticket feature,2,0.0,0.0,-0.0,-0.0,0,5,5,False
+regression,+ legacy net / historical mean,no ticket feature,2,0.4318444051513325,1.3966378481258663,-1.399243654704378,2.4076213106836803,3,0,5,False
+regression,+ tax-inclusive ticket / historical mean,no ticket feature,2,0.5760178633030136,2.3511063341477176,-1.252932860931196,4.518007444079103,3,0,5,False

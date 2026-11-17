@@ -1,0 +1,61 @@
+task,variant,fold,column,masked,correct,history_available,history_correct
+regression,history + mode,1,payment_type,43,32,24,24
+regression,history + mode,1,salesperson,43,36,25,23
+regression,history + mode,1,transport_method,43,18,31,18
+regression,history + Missing,1,payment_type,43,24,24,24
+regression,history + Missing,1,salesperson,43,23,25,23
+regression,history + Missing,1,transport_method,43,18,31,18
+regression,no category history + mode,1,payment_type,43,31,0,0
+regression,no category history + mode,1,salesperson,43,34,0,0
+regression,no category history + mode,1,transport_method,43,7,0,0
+regression,no category history + Missing,1,payment_type,43,0,0,0
+regression,no category history + Missing,1,salesperson,43,0,0,0
+regression,no category history + Missing,1,transport_method,43,0,0,0
+regression,history + mode,2,payment_type,42,32,33,27
+regression,history + mode,2,salesperson,42,32,28,24
+regression,history + mode,2,transport_method,43,32,37,31
+regression,history + Missing,2,payment_type,42,27,33,27
+regression,history + Missing,2,salesperson,42,24,28,24
+regression,history + Missing,2,transport_method,43,31,37,31
+regression,no category history + mode,2,payment_type,42,28,0,0
+regression,no category history + mode,2,salesperson,42,30,0,0
+regression,no category history + mode,2,transport_method,43,5,0,0
+regression,no category history + Missing,2,payment_type,42,0,0,0
+regression,no category history + Missing,2,salesperson,42,0,0,0
+regression,no category history + Missing,2,transport_method,43,0,0,0
+regression,history + mode,3,payment_type,42,42,40,40
+regression,history + mode,3,salesperson,42,39,39,38
+regression,history + mode,3,transport_method,42,24,35,24
+regression,history + Missing,3,payment_type,42,40,40,40
+regression,history + Missing,3,salesperson,42,38,39,38
+regression,history + Missing,3,transport_method,42,24,35,24
+regression,no category history + mode,3,payment_type,42,30,0,0
+regression,no category history + mode,3,salesperson,42,36,0,0
+regression,no category history + mode,3,transport_method,42,5,0,0
+regression,no category history + Missing,3,payment_type,42,0,0,0
+regression,no category history + Missing,3,salesperson,42,0,0,0
+regression,no category history + Missing,3,transport_method,42,0,0,0
+regression,history + mode,4,payment_type,43,42,39,38
+regression,history + mode,4,salesperson,43,41,40,40
+regression,history + mode,4,transport_method,43,27,39,27
+regression,history + Missing,4,payment_type,43,38,39,38
+regression,history + Missing,4,salesperson,43,40,40,40
+regression,history + Missing,4,transport_method,43,27,39,27
+regression,no category history + mode,4,payment_type,43,33,0,0
+regression,no category history + mode,4,salesperson,43,30,0,0
+regression,no category history + mode,4,transport_method,43,7,0,0
+regression,no category history + Missing,4,payment_type,43,0,0,0
+regression,no category history + Missing,4,salesperson,43,0,0,0
+regression,no category history + Missing,4,transport_method,43,0,0,0
+regression,history + mode,5,payment_type,42,38,35,35
+regression,history + mode,5,salesperson,42,39,38,37
+regression,history + mode,5,transport_method,42,29,39,29
+regression,history + Missing,5,payment_type,42,35,35,35
+regression,history + Missing,5,salesperson,42,37,38,37
+regression,history + Missing,5,transport_method,42,29,39,29
+regression,no category history + mode,5,payment_type,42,26,0,0
+regression,no category history + mode,5,salesperson,42,35,0,0
+regression,no category history + mode,5,transport_method,42,5,0,0
+regression,no category history + Missing,5,payment_type,42,0,0,0
+regression,no category history + Missing,5,salesperson,42,0,0,0
+regression,no category history + Missing,5,transport_method,42,0,0,0

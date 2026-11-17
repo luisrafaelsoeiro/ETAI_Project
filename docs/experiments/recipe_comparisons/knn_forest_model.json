@@ -1,0 +1,18 @@
+{
+  "model": {
+    "type": "random_forest",
+    "params": {
+      "n_estimators": 234,
+      "min_samples_leaf": 11,
+      "n_jobs": -1,
+      "random_state": 42,
+      "max_depth": 16,
+      "max_features": 1.0
+    },
+    "target_transform": "none"
+  },
+  "n_trials": 30,
+  "search_seed": 42,
+  "scope": "development sensitivity; median-tuned forest; reused folds, not nested performance",
+  "best_trial_cv_rmse": 1933.620458690793
+}

@@ -1,0 +1,83 @@
+{
+  "config_sha256": "6bcd4df7407cc65955a7b2c83e8d24e686a25ef5b6e50b7c1c054f7eb0f3451e",
+  "train_sha256": "93963c048b6be0da2b932714e938961c087db6aa6144903fbb3042bbdb37e5b5",
+  "cv": {
+    "n_splits": 5,
+    "gap_days": 90
+  },
+  "regression_model_seeds": [
+    42,
+    1,
+    2
+  ],
+  "classification_model_seed": 42,
+  "mask_fraction": 0.1,
+  "mask_seed": 42,
+  "holdout_scored": false,
+  "models": {
+    "classification": {
+      "type": "logistic_regression",
+      "params": {
+        "max_iter": 2000
+      }
+    },
+    "regression": {
+      "type": "random_forest",
+      "params": {
+        "n_estimators": 300,
+        "min_samples_leaf": 5,
+        "n_jobs": -1,
+        "random_state": 42
+      },
+      "target_transform": "none"
+    }
+  },
+  "config_semantic_sha256": "374816889301b4c89de73ef305c0cdcbcd6a7cfcf75f756d808eaa76f1ffbb1e",
+  "data_normalized_sha256": {
+    "train_path": "e8598a3402d81ce72966a4585dde79483be779be25542daf47d7a28fa7adc5a5",
+    "test_path": "2ac176cd1e268a41345055ca3b6250b9b4e35c3095437383955441c38a5c761e",
+    "clientes_path": "a2728544cd85f83859ab164199c65bc16601384f8f687e84a76d37409f255740"
+  },
+  "runtime": {
+    "python": "3.11.2",
+    "pandas": "2.3.3",
+    "numpy": "2.4.6",
+    "scikit-learn": "1.7.2",
+    "category-encoders": "2.11.2"
+  },
+  "base_commit": "6c90b8cc0cb1be67a90d0c005797ce2eaae742df",
+  "replay_source_sha256": {
+    "src/experiments.py": "5466dead579cf012c5d078f0a2ffc09e1383c4ce046565a8b430c254f6bc97ef",
+    "src/preprocessing.py": "c6fb7e798b4b4191f175869acc7e8ce358efbf160333a15b03ec5fd5bea09efd",
+    "src/pipeline.py": "c720c665963b834e9e7ed02b611ed5f3a4b6a89760901b02533785b12769a3db",
+    "src/cleaning.py": "e41c7ba404f4381682b84e4dd2d1a8d74c397b8ef84bde4b322f2ff48162c238",
+    "src/history.py": "7d7a2819abdc20353a59e700b99fa5b69859c8b381f197e4205a8ac113e61940",
+    "src/evaluate.py": "f79d73d81c1b53bc667d749229df81646ec2666042d791b653bd5750e73b9e24",
+    "classification/model.py": "f175e54e6923c7ed6f8adeef9ba99462b6b86ba944d5e605f2ed489dd288c2bc",
+    "regression/model.py": "3a0509b91f9b59037339636c92af16ea4fa40ffbe8dd16c79932213bdbc6e6e2"
+  },
+  "csv_sha256": {
+    "categories_classification_paired_by_seed.csv": "53240ea0ab1272c263a8e44831cd47103189e4478dc3ac4e2f9547572aa08556",
+    "categories_classification_reconstruction.csv": "0ec7cfa94a9f21ac64130ab3b84d80bd88c35662912d9c191474af9e83f939ed",
+    "categories_classification_reconstruction_by_fold.csv": "c2fae2f087f889a1ac86bfb3addbf19b4efb4ec3d5208f3a9f8508929689eda6",
+    "categories_classification_scores.csv": "9192701427ea121774ca35c02f29cd8702f51edaf3357e26aeccc714a243e21f",
+    "categories_classification_summary.csv": "2478fc2392d25141f2df805c41349df183e01afb261c6eb00b47e49c5470ad54",
+    "categories_regression_paired_by_seed.csv": "0d7c5fea93dffbc8800fbec4b17805c33455f27aadf385bf2680729caa1e0a2d",
+    "categories_regression_reconstruction.csv": "f70cc472bfd3c58b118326c81f272e3bbe2f72469b85b1ad7fe80851e66d8787",
+    "categories_regression_reconstruction_by_fold.csv": "f10890a811ecb0f4de32fe6a10aab79af5d51ccdbf9ac2874f206eb25b428113",
+    "categories_regression_scores.csv": "c9f22161cc16086d45f006825d3adecd3253a9000779b51bd221fefb99c0738b",
+    "categories_regression_summary.csv": "bdcb3e532929bd5b0ba116f72dc244e1222aeb52bc01eeba1e2a6213819f53b8",
+    "ticket_classification_basis_audit.csv": "4cfb77e8ba184b7f2d35d6ab4a7eeea39863456b40c490f84d5990a0b9ded423",
+    "ticket_classification_corrected_vs_legacy.csv": "e284c4a049b55f26b77104e89042cf8b02281faedde93a8c003fb71aaadd7f83",
+    "ticket_classification_paired_by_seed.csv": "0863204e6550cf77993b8582480a49f35c7bea36da30d42bcf368da7273c7e3b",
+    "ticket_classification_scores.csv": "b1e963327d7d298d600a1a05b147553b6578daa2aed3617c9933dbe7b188953e",
+    "ticket_classification_summary.csv": "ffd7a0542cb67f358642460eeb4ee8085c790917fd86e9e9cf0c511d7b0c5a57",
+    "ticket_regression_corrected_vs_legacy.csv": "6799d486c52490d78351cf079c6268a91460bac0f1991453bcbc37fff834de32",
+    "ticket_regression_paired_by_seed.csv": "64009124b6d9e79857a685459c440ce96fc9a3aceb63438ed485c1d87ce29355",
+    "ticket_regression_scores.csv": "8782e2b4cb48746801523c3a731513e926d679b341701520f0dc02296132b1c2",
+    "ticket_regression_summary.csv": "db1b780c5a0b7eea54e0244df7b8149071bcc69919a6bad736f04fd05e334a3e"
+  },
+  "seed_aggregation": "Mean within each of the five temporal folds, then descriptive paired comparison over five fold means; seed results also saved separately.",
+  "reconstruction_scope": "10 percent of observed validation cells, fixed masks per task/fold across variants; not accuracy on original gaps.",
+  "completed_date": "2026-11-16"
+}
