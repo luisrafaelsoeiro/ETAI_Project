@@ -59,10 +59,10 @@ pip install -r requirements.txt
 ```bash
 python main.py                          # both tasks: classification, then regression
 python main.py --task classification    # or: --task regression
-python tests/test_pipeline.py           # 20 automated checks of the pipeline (or: python -m pytest tests)
+python tests/test_pipeline.py           # 34 automated checks of the pipeline (or: python -m pytest tests)
 ```
 
-The notebooks in `notebooks/` run with the same environment and find the project root themselves. They follow the workflow in order (01 → 06), and each one also runs on its own.
+The notebooks in `notebooks/` run with the same environment and find the project root themselves. Start with [00 Data exploration](notebooks/00_data_exploration.ipynb), continue through preprocessing (01–06), then classification (07) and regression (08). Each notebook can also be run independently; regression tuning requires a full execution to refresh all recorded results.
 
 ### What `python main.py` does, per task
 
@@ -114,17 +114,19 @@ ETAI_Project/
 │   └── raw/                        # train.csv, test.csv, clientes.csv, sample_submission.csv (never modified)
 │
 ├── notebooks/                      # evidence for every decision, in workflow order (they import the pipeline's own code)
+│   ├── 00_data_exploration.ipynb    # dataset overview, data quality, targets, customer behaviour and conclusions
 │   ├── 01_data_cleaning.ipynb      # diagnosis, validation, dates, duplicates, identity and consistency rules,
 │   │                               # locked test set, temporal folds and the decision rule
 │   ├── 02_customer_table.ipynb     # full preprocessing of clientes.csv and its join, tested in temporal CV
 │   ├── 03_missing_values.ipynb     # target missingness, missingness mechanism, exact recoveries, customer-history
 │   │                               # fill, row limits, estimates from related columns, imputers, expanded KNN sensitivity
 │   ├── 04_outlier_detection.ipynb  # data errors vs valid extremes, transformations and row removal in temporal CV
-│   ├── 05_preprocessing_and_models.ipynb        # build_preprocessor, encoder x scaler, models, final model scores
+│   ├── 05_pipeline_and_models.ipynb                # build_preprocessor, encoder x scaler, models, final model scores
 │   ├── 06_feature_engineering_selection.ipynb   # data additions, redundancy, relevance, permutation importance,
 │   │                               # engineered features, feature selection
-│   └── 07_classification_modelling.ipynb        # baselines, 7 tuned models (Optuna + nested CV), metric comparison,
-│                                   # final model, threshold & business value, SHAP / LIME, drivers of return
+│   ├── 07_classification_modelling.ipynb        # baselines, 7 tuned models (Optuna + nested CV), metric comparison,
+│   │                               # final model, threshold & business value, SHAP / LIME, drivers of return
+│   └── 08_regression_modelling.ipynb            # conditional spend, model comparison, tuning, residuals and spend drivers
 │
 ├── src/                            # shared by both tasks
 │   ├── data.py                     # loading, placeholder report, column names, schema and customer_id validation, dtypes
@@ -149,7 +151,7 @@ ETAI_Project/
 │   └── evaluate.py                 # metrics (SCORING), error reports by spend band
 │
 ├── tests/
-│   └── test_pipeline.py            # 20 checks: feature lists, indicators, leakage, cleaning, schema, selection step, exclusions,
+│   └── test_pipeline.py            # 34 checks: feature lists, indicators, leakage, cleaning, schema, selection step, exclusions,
 │                                   # placeholders, save/load/predict, tuning, Kaggle format, customer table,
 │                                   # exact recoveries, customer-history fill, row limits, column estimates
 │
@@ -521,7 +523,7 @@ For categorical fallbacks, the controlled history × mode/Missing experiment is 
 
 ### 11. Recipe + model = one Pipeline [05 §3–4]
 
-Mean temporal-CV scores on the development set, with each task's final recipe (`notebooks/05_preprocessing_and_models.ipynb`, section 4):
+Mean temporal-CV scores on the development set, with each task's final recipe (`notebooks/05_pipeline_and_models.ipynb`, section 4):
 
 | Model | Classification accuracy (train / validation) | Regression RMSE (train / validation) |
 |---|---|---|
