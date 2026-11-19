@@ -561,8 +561,8 @@ classification:
     scaler: standard
     exclude_features: [document_series, shipping_cost, invoice_count_current_purchase]
   # Working reference model; full nb05 model ranking awaits rerun under the corrected protocol.
-  # types: dummy | logistic_regression | knn | decision_tree | random_forest | extra_trees |
-  #        gradient_boosting | hist_gradient_boosting | xgboost
+  # types: dummy | logistic_regression | decision_tree | random_forest | gradient_boosting |
+  #        hist_gradient_boosting | xgboost
   model: {type: logistic_regression, params: {max_iter: 2000}}
   # Optuna + nested temporal CV on the selection metric (`python main.py` runs it when enabled;
   # slow: n_trials x inner_splits fits per outer fold)
