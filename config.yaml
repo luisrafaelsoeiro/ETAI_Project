@@ -466,8 +466,23 @@ preprocessing:
   # spend_365d is only missing for customers with > 365 days of tenure
   mnar_indicator_sources: [spend_365d]
   imputation:
-    numeric_strategy: median          # median | mean | constant | knn | iterative (nb03 4)
+    numeric_strategy: median          # median | mean | constant | knn | iterative | random_forest (nb03 4, nb08)
     # knn only: n_neighbors (default 5) and knn_weights (uniform | distance).
+    # iterative / random_forest: max_iter (default 10); random_forest: n_estimators trees per column
+    # (default 50) -- the missForest idea, the slowest. Seed: random_state (default 0).
+    # Week 10 (nb08 3-4, docs/experiments/imputers/): after the history fill only spend_365d (2.7%)
+    # and prior_max_purchase_value (0.7%) still have gaps. random_forest guesses hidden values best
+    # (about half the median's error), but no imputer changes the models: at most +0.0014 accuracy
+    # and -0.64 RMSE euros, every corrected p > 0.09, missForest ~10x slower. The median stays.
+    max_iter: 10
+    n_estimators: 50
+    # knn / iterative / random_forest only: the imputer also SEES the categorical columns (one-hot,
+    # categories under helper_min_frequency training rows grouped); it still fills numeric columns only
+    categorical_helpers: false
+    helper_min_frequency: 20
+    # iterative only: > 1 trains that many pipelines, each on its own randomly drawn completed
+    # dataset (sample_posterior), and averages their predictions (MICE; n_imputations times the cost)
+    n_imputations: 1
     # nb03 12 refreshed: classification KNN k=3 uniform improves 4 folds, ties 1.
     # Regression KNN gains are tiny in the median-tuned forest sensitivity test.
     # Retain median as the reference; carry promising variants into model comparisons.

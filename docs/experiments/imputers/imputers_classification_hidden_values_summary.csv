@@ -1,0 +1,33 @@
+column,variant,mean,std
+days_since_previous_purchase,median,91.69,15.714414958884088
+prior_max_purchase_value,median,1153.931062903145,301.4924946672407
+prior_mean_gap_days,median,65.07520308839112,6.155150717052075
+spend_365d,median,2355.886371267902,767.2056453316496
+days_since_previous_purchase,knn,49.356,9.371145741050029
+prior_max_purchase_value,knn,519.2753080768447,41.317132251040974
+prior_mean_gap_days,knn,25.988428764270218,2.7510801065047676
+spend_365d,knn,1348.15814493944,478.57408659261165
+days_since_previous_purchase,iterative,123.8972795270472,26.79658622695577
+prior_max_purchase_value,iterative,440.8148380977667,60.075676052689886
+prior_mean_gap_days,iterative,72.91151841237331,28.861183862846918
+spend_365d,iterative,1270.0531769459135,274.3149314037987
+days_since_previous_purchase,random_forest,24.246485717134693,2.7476049816808197
+prior_max_purchase_value,random_forest,362.59042177732965,24.955394009275167
+prior_mean_gap_days,random_forest,21.792430440969255,3.6414059348198196
+spend_365d,random_forest,1216.6821258993266,209.66397552462536
+days_since_previous_purchase,knn+categories,55.75,12.57804976934024
+prior_max_purchase_value,knn+categories,497.8020385219232,40.0152203787053
+prior_mean_gap_days,knn+categories,29.51289397960486,2.946665241983363
+spend_365d,knn+categories,1358.1873787762502,481.5970620298554
+days_since_previous_purchase,iterative+categories,123.06004339762826,21.346331542292635
+prior_max_purchase_value,iterative+categories,430.42153972329896,60.795399995486925
+prior_mean_gap_days,iterative+categories,73.26101317111231,25.868056267766754
+spend_365d,iterative+categories,1262.5082670213615,268.3682572501986
+days_since_previous_purchase,random_forest+categories,24.40992248748688,2.6911361293353777
+prior_max_purchase_value,random_forest+categories,360.77701088919696,26.185679081711267
+prior_mean_gap_days,random_forest+categories,21.957705089449167,3.14036620950154
+spend_365d,random_forest+categories,1232.4151262514345,206.33574323296187
+days_since_previous_purchase,rf_proximity (B3),61.852375402369816,7.4831330821799416
+prior_max_purchase_value,rf_proximity (B3),923.7722131765213,141.83916645898617
+prior_mean_gap_days,rf_proximity (B3),44.31146793071287,5.315700254275668
+spend_365d,rf_proximity (B3),2493.6343257951494,432.2659987798769

@@ -5,3 +5,4 @@ __pycache__/
 models/
 results/
 .ipynb_checkpoints/
+predictions.csv

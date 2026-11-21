@@ -30,3 +30,11 @@ The original Portuguese column names (`Total a Pagar`, `Custo`, `N_ Detalhes`, �
 in `config.yaml` → `diagnostics.column_renames`. Data-quality findings and every cleaning
 decision are documented in the main README (*Preprocessing Decisions*) and in
 `notebooks/01_data_cleaning.ipynb` (cleaning), followed by the other notebooks of the workflow.
+
+## Example new records (`examples/`)
+
+`examples/new_purchases.csv`: 20 purchases taken from test.csv, with the original column names, made messy on
+purpose to show `predict.py` at work: `"?"` in `Custo`, a blank `days_since_previous_purchase`, a valid but unseen
+payment type, an invalid salesperson label `"X"`, `"N/A"` in `transport_method`, a customer id with no earlier
+purchase on file, the `1000000000` placeholder in `spend_365d`, and the same purchase twice (rows 14–15).
+`python predict.py data/examples/new_purchases.csv predictions.csv` gives 20 predictions.

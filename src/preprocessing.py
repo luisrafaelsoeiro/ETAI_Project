@@ -265,42 +265,64 @@ class RowBoundedImputer(BaseEstimator, TransformerMixin):
          order: bound a historical maximum before a spend limit that depends on it.
          `max` wins if the limits cross.
 
-    `scaler` (KNN / iterative imputation): the base imputer works in scaled space, so
-    large-valued columns don't dominate distances, then returns to the original units so the
-    limits can be compared -- the pipeline's own scaler follows this step.
+    `scaler` (KNN / iterative / random-forest imputation): the base imputer works in scaled
+    space, so large-valued columns don't dominate distances, then returns to the original units
+    so the limits can be compared -- the pipeline's own scaler follows this step.
+
+    `helper_features` (`imputation.categorical_helpers`): categorical columns the base imputer
+    may also SEE, one-hot encoded (gaps as "Missing", categories under `helper_min_frequency`
+    training rows grouped), appended after the numeric columns. They only inform the guesses:
+    the step still outputs the numeric columns alone. A model-based imputer is only as good
+    as the columns it can see.
     """
 
-    def __init__(self, imputer, feature_names, bounds=None, scaler=None, column_imputers=None, fit_rows=None):
+    def __init__(self, imputer, feature_names, bounds=None, scaler=None, column_imputers=None, fit_rows=None,
+                 helper_features=None, helper_min_frequency=20):
         self.imputer = imputer
         self.feature_names = feature_names
         self.bounds = bounds
         self.scaler = scaler
         self.column_imputers = column_imputers
         self.fit_rows = fit_rows
+        self.helper_features = helper_features
+        self.helper_min_frequency = helper_min_frequency
 
-    def _frame(self, X) -> pd.DataFrame:
-        frame = pd.DataFrame(X).astype("float64")
-        frame.columns = list(self.feature_names)
-        return frame
+    def _split(self, X):
+        """(numeric frame in float64, helper frame as text with "Missing" for gaps)."""
+        numeric, helpers = list(self.feature_names), list(self.helper_features or [])
+        frame = pd.DataFrame(X)
+        frame.columns = numeric + helpers
+        helper_frame = frame[helpers].astype(object)
+        return frame[numeric].astype("float64"), helper_frame.where(helper_frame.notna(), "Missing").astype(str)
+
+    def _base_input(self, numeric, helpers):
+        """What the base imputer sees: the numeric columns (scaled if requested) + encoded helpers."""
+        values = numeric.to_numpy() if self.scaler_ is None else self.scaler_.transform(numeric)
+        if self.helper_encoder_ is None:
+            return values
+        return np.hstack([values, self.helper_encoder_.transform(helpers)])
 
     def fit(self, X, y=None):
-        X = self._frame(X)
+        X, helpers = self._split(X)
         self.estimates_ = [_ColumnEstimate(c, spec).fit(X) for c, spec in (self.column_imputers or {}).items()]
         base = X.copy()
         for column, condition in (self.fit_rows or {}).items():
             base.loc[~X.eval(condition).astype(bool), column] = np.nan  # not learned from these rows
         self.scaler_ = clone(self.scaler).fit(X) if self.scaler is not None else None
-        self.imputer_ = clone(self.imputer).fit(base if self.scaler_ is None else self.scaler_.transform(base))
-        self.n_features_in_ = X.shape[1]
+        self.helper_encoder_ = (OneHotEncoder(handle_unknown="infrequent_if_exist", sparse_output=False,
+                                              min_frequency=self.helper_min_frequency).fit(helpers)
+                                if self.helper_features else None)
+        self.imputer_ = clone(self.imputer).fit(self._base_input(base, helpers))
+        self.n_features_in_ = X.shape[1] + helpers.shape[1]
         return self
 
     def transform(self, X):
-        X = self._frame(X)
+        X, helpers = self._split(X)
         missing = X.isna()
         partial = X.copy()
         for estimate in self.estimates_:
             partial[estimate.column] = partial[estimate.column].fillna(estimate.estimate(X))
-        filled = self.imputer_.transform(partial if self.scaler_ is None else self.scaler_.transform(partial))
+        filled = self.imputer_.transform(self._base_input(partial, helpers))[:, :X.shape[1]]
         if self.scaler_ is not None:
             filled = self.scaler_.inverse_transform(filled)
         filled = pd.DataFrame(filled, columns=X.columns, index=X.index)
@@ -321,19 +343,37 @@ class RowBoundedImputer(BaseEstimator, TransformerMixin):
         return np.asarray(self.feature_names, dtype=object)
 
 
+# Numeric fallback imputers, one per `imputation.numeric_strategy` (like _SCALERS and _ENCODERS).
+# Each takes the `imputation` section and a seed. "iterative" is MICE with one completed dataset
+# (each gap = the regression's best guess; `sample_posterior: true` draws around it instead, which
+# is what `n_imputations` > 1 uses); "random_forest" is the missForest idea: the same loop with a
+# random forest predicting each column from the others. All of them learn from the feature columns
+# only, never from the target, so they run unchanged in cross-validation and on new records.
+# keep_empty_features: a column with no usable training value (possible on a very small fold,
+# e.g. the first inner fold of nested CV, once `fit_rows` removes the structural rows) is kept
+# and filled with 0 instead of being silently dropped, which would break RowBoundedImputer's shape.
+_NUMERIC_IMPUTERS = {
+    "median": lambda cfg, seed: SimpleImputer(strategy="median", keep_empty_features=True),
+    "mean": lambda cfg, seed: SimpleImputer(strategy="mean", keep_empty_features=True),
+    "constant": lambda cfg, seed: SimpleImputer(strategy="constant", fill_value=cfg.get("numeric_fill_value", 0),
+                                                keep_empty_features=True),
+    "knn": lambda cfg, seed: KNNImputer(n_neighbors=cfg.get("n_neighbors", 5), weights=cfg.get("knn_weights", "uniform")),
+    "iterative": lambda cfg, seed: IterativeImputer(max_iter=cfg.get("max_iter", 10), random_state=seed,
+                                                    sample_posterior=cfg.get("sample_posterior", False)),
+    "random_forest": lambda cfg, seed: IterativeImputer(
+        estimator=RandomForestRegressor(n_estimators=cfg.get("n_estimators", 50), min_samples_leaf=5,
+                                        random_state=seed, n_jobs=-1),
+        max_iter=cfg.get("max_iter", 10), random_state=seed),
+}
+# imputers that model one column from the others: they work in scaled space and can use helpers
+MODEL_BASED_IMPUTERS = ("knn", "iterative", "random_forest")
+
+
 def _numeric_imputer(imputation: dict):
     strategy = imputation.get("numeric_strategy", "median")
-    if strategy == "knn":
-        return KNNImputer(n_neighbors=imputation.get("n_neighbors", 5), weights=imputation.get("knn_weights", "uniform"))
-    if strategy == "iterative":
-        return IterativeImputer(max_iter=imputation.get("max_iter", 10), random_state=imputation.get("random_state", 0))
-    # keep_empty_features: a column with no usable training value (possible on a very small fold,
-    # e.g. the first inner fold of nested CV, once `fit_rows` removes the structural rows) is kept
-    # and filled with 0 instead of being silently dropped, which would break RowBoundedImputer's shape
-    if strategy == "constant":
-        return SimpleImputer(strategy="constant", fill_value=imputation.get("numeric_fill_value", 0),
-                             keep_empty_features=True)
-    return SimpleImputer(strategy=strategy, keep_empty_features=True)
+    if strategy not in _NUMERIC_IMPUTERS:
+        raise ValueError(f"Unknown numeric_strategy: {strategy}. Options: {list(_NUMERIC_IMPUTERS)}")
+    return _NUMERIC_IMPUTERS[strategy](imputation, imputation.get("random_state", 0))
 
 
 def check_feature_lists(preprocessing_config: dict, available_columns=None) -> None:
@@ -421,11 +461,13 @@ def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
     section. Nothing is fitted here -- it is fitted later, inside the model's Pipeline, on
     training rows only. Every encoder tolerates categories never seen in training.
 
-    Numeric: `RowBoundedImputer` (impute -- "median" / "mean" / "constant" directly, "knn" /
-    "iterative" in scaled space so distances / regressions are not dominated by the
-    large-valued columns -- then keep imputed values within their row's limits,
-    `imputation.row_bounds`), optional numeric transform, then scale. All formulas/bounds
-    run in original units. Categorical: impute, group rare categories, encode.
+    Numeric: `RowBoundedImputer` (impute with `_NUMERIC_IMPUTERS[numeric_strategy]` --
+    "median" / "mean" / "constant" directly, "knn" / "iterative" / "random_forest" in scaled
+    space so distances / regressions are not dominated by the large-valued columns, optionally
+    also seeing the categorical columns (`categorical_helpers`) -- then keep imputed values
+    within their row's limits, `imputation.row_bounds`), optional numeric transform, then
+    scale. All formulas/bounds run in original units. Categorical: impute, group rare
+    categories, encode.
     Indicators: `MissingIndicator` on the raw (not yet imputed) MNAR/MAR columns.
     """
     check_feature_lists(preprocessing_config)
@@ -439,12 +481,17 @@ def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
     scaler = scaler_factory() if callable(scaler_factory) else scaler_factory
     encoder = _ENCODERS[preprocessing_config["encoder"]](preprocessing_config.get("random_state"))
 
-    scale_before_imputing = imputation.get("numeric_strategy", "median") in ("knn", "iterative") and scaler != "passthrough"
+    model_based = imputation.get("numeric_strategy", "median") in MODEL_BASED_IMPUTERS
+    scale_before_imputing = model_based and scaler != "passthrough"
+    # the categorical columns are extra inputs of a model-based numeric imputer (it still outputs
+    # the numeric columns only); a median has no use for them
+    helpers = list(categorical_features) if model_based and imputation.get("categorical_helpers", False) else []
     numeric_pipeline = Pipeline([
         ("impute", RowBoundedImputer(
             _numeric_imputer(imputation), list(numeric_features), imputation.get("row_bounds", {}),
             scaler=clone(scaler) if scale_before_imputing else None,
             column_imputers=imputation.get("column_imputers", {}), fit_rows=imputation.get("fit_rows", {}),
+            helper_features=helpers, helper_min_frequency=imputation.get("helper_min_frequency", 20),
         )),
         # Formulas/bounds above must see euros, days and counts in their original units.
         ("outlier_transform", clone(preprocessing_config["numeric_transform"])
@@ -461,7 +508,7 @@ def build_preprocessor(preprocessing_config: dict) -> ColumnTransformer:
     # every transformer sees the ORIGINAL columns, so the indicators see the gaps before
     # the numeric/categorical imputers fill them
     return ColumnTransformer([
-        ("numeric", numeric_pipeline, numeric_features),
+        ("numeric", numeric_pipeline, list(numeric_features) + helpers),
         ("categorical", categorical_pipeline, categorical_features),
         ("indicators", MissingIndicator(features="all"), mnar_indicator_sources),
         ("flags", "passthrough", flag_features),

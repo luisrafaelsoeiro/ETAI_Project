@@ -1,0 +1,161 @@
+task,fold,variant,column,hidden,mae
+classification,1,median,days_since_previous_purchase,200,66.05
+classification,1,median,prior_max_purchase_value,200,751.5772316899721
+classification,1,median,prior_mean_gap_days,200,67.10145249517366
+classification,1,median,spend_365d,200,1071.4518986135215
+classification,1,knn,days_since_previous_purchase,200,34.894
+classification,1,knn,prior_max_purchase_value,200,462.1129022779652
+classification,1,knn,prior_mean_gap_days,200,26.674236375290512
+classification,1,knn,spend_365d,200,639.923912241533
+classification,1,iterative,days_since_previous_purchase,200,103.07813660219101
+classification,1,iterative,prior_max_purchase_value,200,380.975493114051
+classification,1,iterative,prior_mean_gap_days,200,69.77913050620583
+classification,1,iterative,spend_365d,200,947.522075228024
+classification,1,random_forest,days_since_previous_purchase,200,22.58834526732255
+classification,1,random_forest,prior_max_purchase_value,200,335.0209302998222
+classification,1,random_forest,prior_mean_gap_days,200,25.007974148043495
+classification,1,random_forest,spend_365d,200,1062.0129051761269
+classification,1,knn+categories,days_since_previous_purchase,200,35.857
+classification,1,knn+categories,prior_max_purchase_value,200,457.3601275967331
+classification,1,knn+categories,prior_mean_gap_days,200,27.819855997335136
+classification,1,knn+categories,spend_365d,200,655.8428378489053
+classification,1,iterative+categories,days_since_previous_purchase,200,105.53195825366998
+classification,1,iterative+categories,prior_max_purchase_value,200,376.7523923659054
+classification,1,iterative+categories,prior_mean_gap_days,200,70.41947580469993
+classification,1,iterative+categories,spend_365d,200,946.3331094707173
+classification,1,random_forest+categories,days_since_previous_purchase,200,22.846736903032042
+classification,1,random_forest+categories,prior_max_purchase_value,200,333.0701250680309
+classification,1,random_forest+categories,prior_mean_gap_days,200,25.055243282528114
+classification,1,random_forest+categories,spend_365d,200,1060.979355312361
+classification,1,rf_proximity (B3),days_since_previous_purchase,200,52.40174004141999
+classification,1,rf_proximity (B3),prior_max_purchase_value,200,736.34727858478
+classification,1,rf_proximity (B3),prior_mean_gap_days,200,43.60978889302838
+classification,1,rf_proximity (B3),spend_365d,200,1968.4770680329973
+classification,2,median,days_since_previous_purchase,200,95.89
+classification,2,median,prior_max_purchase_value,200,991.9578419900896
+classification,2,median,prior_mean_gap_days,200,55.64368887758562
+classification,2,median,spend_365d,200,2247.233819695722
+classification,2,knn,days_since_previous_purchase,200,46.14
+classification,2,knn,prior_max_purchase_value,200,527.2060776700815
+classification,2,knn,prior_mean_gap_days,200,21.97592092916104
+classification,2,knn,spend_365d,200,1275.1587318543095
+classification,2,iterative,days_since_previous_purchase,200,169.78789484628697
+classification,2,iterative,prior_max_purchase_value,200,395.1350436651262
+classification,2,iterative,prior_mean_gap_days,200,122.4623978163655
+classification,2,iterative,spend_365d,200,1008.8956057058626
+classification,2,random_forest,days_since_previous_purchase,200,25.10219110939155
+classification,2,random_forest,prior_max_purchase_value,200,337.9484431290028
+classification,2,random_forest,prior_mean_gap_days,200,24.34710582164489
+classification,2,random_forest,spend_365d,200,981.5684459654262
+classification,2,knn+categories,days_since_previous_purchase,200,53.571
+classification,2,knn+categories,prior_max_purchase_value,200,505.4083965515146
+classification,2,knn+categories,prior_mean_gap_days,200,25.943155788340327
+classification,2,knn+categories,spend_365d,200,1292.2494116243508
+classification,2,iterative+categories,days_since_previous_purchase,200,159.1950626269006
+classification,2,iterative+categories,prior_max_purchase_value,200,378.87104615906014
+classification,2,iterative+categories,prior_mean_gap_days,200,117.21998953476565
+classification,2,iterative+categories,spend_365d,200,1001.4562383989983
+classification,2,random_forest+categories,days_since_previous_purchase,200,25.111697849348158
+classification,2,random_forest+categories,prior_max_purchase_value,200,332.79139038469395
+classification,2,random_forest+categories,prior_mean_gap_days,200,23.38521148120438
+classification,2,random_forest+categories,spend_365d,200,1021.8143487106942
+classification,2,rf_proximity (B3),days_since_previous_purchase,200,64.42948498496517
+classification,2,rf_proximity (B3),prior_max_purchase_value,200,929.5056598545608
+classification,2,rf_proximity (B3),prior_mean_gap_days,200,39.797369955293945
+classification,2,rf_proximity (B3),spend_365d,200,2419.1685418045713
+classification,3,median,days_since_previous_purchase,200,89.115
+classification,3,median,prior_max_purchase_value,200,1271.176607654763
+classification,3,median,prior_mean_gap_days,200,62.79342160759723
+classification,3,median,spend_365d,200,2772.3640342347558
+classification,3,knn,days_since_previous_purchase,200,50.977
+classification,3,knn,prior_max_purchase_value,200,548.7228701106434
+classification,3,knn,prior_mean_gap_days,200,24.581646196033585
+classification,3,knn,spend_365d,200,1726.5989745544873
+classification,3,iterative,days_since_previous_purchase,200,119.10708349559226
+classification,3,iterative,prior_max_purchase_value,200,470.0992624809907
+classification,3,iterative,prior_mean_gap_days,200,66.71600036519226
+classification,3,iterative,spend_365d,200,1554.7596030731636
+classification,3,random_forest,days_since_previous_purchase,200,21.73674920345955
+classification,3,random_forest,prior_max_purchase_value,200,373.75218509684936
+classification,3,random_forest,prior_mean_gap_days,200,16.267452772970813
+classification,3,random_forest,spend_365d,200,1343.7048219234252
+classification,3,knn+categories,days_since_previous_purchase,200,56.371
+classification,3,knn+categories,prior_max_purchase_value,200,549.293459874498
+classification,3,knn+categories,prior_mean_gap_days,200,30.349310909297905
+classification,3,knn+categories,spend_365d,200,1711.2772372286186
+classification,3,iterative+categories,days_since_previous_purchase,200,119.9335162265127
+classification,3,iterative+categories,prior_max_purchase_value,200,473.8679414817884
+classification,3,iterative+categories,prior_mean_gap_days,200,69.92655975169599
+classification,3,iterative+categories,spend_365d,200,1531.5318556063878
+classification,3,random_forest+categories,days_since_previous_purchase,200,22.13797471025899
+classification,3,random_forest+categories,prior_max_purchase_value,200,374.98405055766017
+classification,3,random_forest+categories,prior_mean_gap_days,200,16.999968209747827
+classification,3,random_forest+categories,spend_365d,200,1385.2766745494444
+classification,3,rf_proximity (B3),days_since_previous_purchase,200,56.40081579290148
+classification,3,rf_proximity (B3),prior_max_purchase_value,200,977.8526834238047
+classification,3,rf_proximity (B3),prior_mean_gap_days,200,38.61287713689321
+classification,3,rf_proximity (B3),spend_365d,200,2625.859650846943
+classification,4,median,days_since_previous_purchase,200,100.72
+classification,4,median,prior_max_purchase_value,200,1201.7169977439162
+classification,4,median,prior_mean_gap_days,200,68.13569302258266
+classification,4,median,spend_365d,200,2698.4101350935443
+classification,4,knn,days_since_previous_purchase,200,57.731
+classification,4,knn,prior_max_purchase_value,200,494.2737911621327
+classification,4,knn,prior_mean_gap_days,200,28.86568408608231
+classification,4,knn,spend_365d,200,1245.5237199999997
+classification,4,iterative,days_since_previous_purchase,200,120.9757750781078
+classification,4,iterative,prior_max_purchase_value,200,428.90463728037923
+classification,4,iterative,prior_mean_gap_days,200,55.91788284433933
+classification,4,iterative,spend_365d,200,1458.352783549925
+classification,4,random_forest,days_since_previous_purchase,200,23.170204996854277
+classification,4,random_forest,prior_max_purchase_value,200,374.26489061944795
+classification,4,random_forest,prior_mean_gap_days,200,19.9938307355559
+classification,4,random_forest,spend_365d,200,1196.4398480647403
+classification,4,knn+categories,days_since_previous_purchase,200,67.44800000000001
+classification,4,knn+categories,prior_max_purchase_value,200,457.7651526732668
+classification,4,knn+categories,prior_mean_gap_days,200,33.80285169169598
+classification,4,knn+categories,spend_365d,200,1234.692828869031
+classification,4,iterative+categories,days_since_previous_purchase,200,121.64808718893327
+classification,4,iterative+categories,prior_max_purchase_value,200,409.1021466552472
+classification,4,iterative+categories,prior_mean_gap_days,200,56.74268531021579
+classification,4,iterative+categories,spend_365d,200,1409.441589695672
+classification,4,random_forest+categories,days_since_previous_purchase,200,23.151525917034878
+classification,4,random_forest+categories,prior_max_purchase_value,200,373.47205104124487
+classification,4,random_forest+categories,prior_mean_gap_days,200,20.920592804452298
+classification,4,random_forest+categories,spend_365d,200,1193.823643806339
+classification,4,rf_proximity (B3),days_since_previous_purchase,200,71.35855034968286
+classification,4,rf_proximity (B3),prior_max_purchase_value,200,856.7239202451376
+classification,4,rf_proximity (B3),prior_mean_gap_days,200,50.0152217246851
+classification,4,rf_proximity (B3),spend_365d,200,2315.4069607357783
+classification,5,median,days_since_previous_purchase,200,106.675
+classification,5,median,prior_max_purchase_value,200,1553.2266354369845
+classification,5,median,prior_mean_gap_days,200,71.7017594390164
+classification,5,median,spend_365d,200,2989.9719687019656
+classification,5,knn,days_since_previous_purchase,200,57.038000000000004
+classification,5,knn,prior_max_purchase_value,200,564.0608991634007
+classification,5,knn,prior_mean_gap_days,200,27.84465623478366
+classification,5,knn,spend_365d,200,1853.5853860468706
+classification,5,iterative,days_since_previous_purchase,200,106.53750761305793
+classification,5,iterative,prior_max_purchase_value,200,528.9597539482867
+classification,5,iterative,prior_mean_gap_days,200,49.68218052976365
+classification,5,iterative,spend_365d,200,1380.7358171725925
+classification,5,random_forest,days_since_previous_purchase,200,28.634938008645534
+classification,5,random_forest,prior_max_purchase_value,200,391.9656597415258
+classification,5,random_forest,prior_mean_gap_days,200,23.34578872663118
+classification,5,random_forest,spend_365d,200,1499.6846083669143
+classification,5,knn+categories,days_since_previous_purchase,200,65.503
+classification,5,knn+categories,prior_max_purchase_value,200,519.1830559136033
+classification,5,knn+categories,prior_mean_gap_days,200,29.649295511354943
+classification,5,knn+categories,spend_365d,200,1896.8745783103454
+classification,5,iterative+categories,days_since_previous_purchase,200,108.9915926921248
+classification,5,iterative+categories,prior_max_purchase_value,200,513.5141719544937
+classification,5,iterative+categories,prior_mean_gap_days,200,51.996355454184226
+classification,5,iterative+categories,spend_365d,200,1423.7785419350316
+classification,5,random_forest+categories,days_since_previous_purchase,200,28.801677057760333
+classification,5,random_forest+categories,prior_max_purchase_value,200,389.56743739435484
+classification,5,random_forest+categories,prior_mean_gap_days,200,23.427509669313213
+classification,5,random_forest+categories,spend_365d,200,1500.181608878333
+classification,5,rf_proximity (B3),days_since_previous_purchase,200,64.67128584287958
+classification,5,rf_proximity (B3),prior_max_purchase_value,200,1118.4315237743235
+classification,5,rf_proximity (B3),prior_mean_gap_days,200,49.52208194366372
+classification,5,rf_proximity (B3),spend_365d,200,3139.2594075554575

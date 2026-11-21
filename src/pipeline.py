@@ -10,27 +10,99 @@ The estimator and its life cycle, shared by both tasks:
   - `save_pipeline` / `load_pipeline`: joblib persistence of a fitted pipeline;
   - `predict_new_records`: raw purchase rows (as in test.csv) -> predictions.
 """
+import json
+import platform
+import warnings
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
 import joblib
+import numpy as np
 import pandas as pd
-from sklearn.base import is_classifier
+from sklearn.base import BaseEstimator, ClassifierMixin, RegressorMixin, clone, is_classifier
 from sklearn.pipeline import Pipeline
 
 from src.cleaning import drop_training_rows, prepare_table
-from src.data import load_data, report_placeholders, validate_customer_ids
+from src.data import load_data, report_placeholders, standardize_columns, validate_customer_ids
 from src.preprocessing import (
-    build_preprocessor, build_selector, check_feature_lists, split_dev_test, task_preprocessing_config,
+    MODEL_BASED_IMPUTERS, build_preprocessor, build_selector, check_feature_lists, split_dev_test,
+    task_preprocessing_config,
 )
 from src.tasks import get_task
 from src.history import CustomerHistoryFiller
 
 
-def build_pipeline(preprocessing_config: dict, model) -> Pipeline:
+class _MultipleImputation(BaseEstimator):
+    """
+    MICE as the theory describes it: `n_imputations` copies of `pipeline`, each with its
+    iterative imputer DRAWING every gap around the regression's guess (`sample_posterior`)
+    with its own seed -- so each copy is trained on a different completed dataset -- and their
+    predictions averaged. The spread between copies is the imputation uncertainty a single
+    imputation hides. Costs `n_imputations` times one pipeline. Hyperparameters are reached
+    through the template: `pipeline__model__C`.
+
+    The draws happen in TRAINING only: once a copy is fitted, its imputer fills new rows with
+    its own best guess (no draw). Otherwise a fitted imputer keeps drawing, so the same
+    purchase would get a different prediction on every call, depending on the other rows of
+    the batch. The copies still disagree on a new row's gaps -- each learned its imputation
+    models and its classifier from a different completed dataset -- and their average is
+    reproducible and row by row.
+    """
+
+    IMPUTER = "prep__numeric__impute__imputer"
+
+    def __init__(self, pipeline, n_imputations: int = 5, random_state: int = 0):
+        self.pipeline = pipeline
+        self.n_imputations = n_imputations
+        self.random_state = random_state
+
+    def fit(self, X, y):
+        self.pipelines_ = []
+        for i in range(self.n_imputations):
+            copy = clone(self.pipeline).set_params(**{f"{self.IMPUTER}__sample_posterior": True,
+                                                      f"{self.IMPUTER}__random_state": self.random_state + i})
+            copy.fit(X, y)
+            fitted_imputer(copy).sample_posterior = False      # trained on draws; predicts with the best guess
+            self.pipelines_.append(copy)
+        return self
+
+
+def fitted_imputer(pipeline):
+    """The fitted base numeric imputer (e.g. the IterativeImputer) inside a fitted Pipeline."""
+    return pipeline.named_steps["prep"].named_transformers_["numeric"].named_steps["impute"].imputer_
+
+
+class MultipleImputationClassifier(ClassifierMixin, _MultipleImputation):
+    """Averages the class probabilities of the copies; predicts the most probable class."""
+
+    def fit(self, X, y):
+        super().fit(X, y)
+        self.classes_ = self.pipelines_[0].classes_
+        return self
+
+    def predict_proba(self, X):
+        return np.mean([p.predict_proba(X) for p in self.pipelines_], axis=0)
+
+    def predict(self, X):
+        return self.classes_[np.argmax(self.predict_proba(X), axis=1)]
+
+
+class MultipleImputationRegressor(RegressorMixin, _MultipleImputation):
+    """Averages the predictions of the copies."""
+
+    def predict(self, X):
+        return np.mean([p.predict(X) for p in self.pipelines_], axis=0)
+
+
+def build_pipeline(preprocessing_config: dict, model):
     """Preprocessing (+ optional feature selection) + model as one estimator: `fit` learns
     everything from training rows only. Step names address hyperparameters from outside
     (`model__max_depth`). Optional history is frozen inside each fit, then preprocessing,
-    optional selection and the model run. `selection.method: none` adds no selector."""
+    optional selection and the model run. `selection.method: none` adds no selector.
+
+    `imputation.n_imputations` > 1 (needs `numeric_strategy: iterative`) returns that many
+    copies of the Pipeline as one estimator (`MultipleImputationClassifier` / `...Regressor`),
+    each trained on its own randomly drawn completed dataset, with averaged predictions."""
     steps = []
     if preprocessing_config.get("customer_history") is not None:
         steps.append(("history", CustomerHistoryFiller(preprocessing_config["customer_history"])))
@@ -39,7 +111,29 @@ def build_pipeline(preprocessing_config: dict, model) -> Pipeline:
                               preprocessing_config.get("random_state"))
     if selector is not None:
         steps.append(("select", selector))
-    return Pipeline(steps + [("model", model)])
+    pipeline = Pipeline(steps + [("model", model)])
+
+    imputation = preprocessing_config.get("imputation", {})
+    n_imputations = int(imputation.get("n_imputations", 1))
+    if n_imputations <= 1:
+        return pipeline
+    if imputation.get("numeric_strategy") != "iterative":
+        raise ValueError("imputation.n_imputations > 1 draws from the iterative imputer: "
+                         "set imputation.numeric_strategy: iterative.")
+    ensemble = MultipleImputationClassifier if is_classifier(model) else MultipleImputationRegressor
+    return ensemble(pipeline, n_imputations, imputation.get("random_state", 0))
+
+
+def imputer_label(preprocessing_config: dict) -> str:
+    """The numeric imputer in a few characters, for the scoreboard and the reports:
+    e.g. "median", "knn+categories", "iterative x5"."""
+    imputation = preprocessing_config.get("imputation", {})
+    label = imputation.get("numeric_strategy", "median")
+    if imputation.get("categorical_helpers", False) and label in MODEL_BASED_IMPUTERS:
+        label += "+categories"
+    if int(imputation.get("n_imputations", 1)) > 1:
+        label += f" x{int(imputation['n_imputations'])}"
+    return label
 
 
 def prepare_task_data(config: dict, task: str) -> dict:
@@ -98,17 +192,77 @@ def prepare_task_data(config: dict, task: str) -> dict:
     }
 
 
+# the libraries a saved pipeline depends on: a model must be loaded with the versions it was saved with
+_PICKLE_LIBRARIES = ("scikit-learn", "xgboost", "numpy", "pandas", "scipy", "joblib", "category-encoders")
+
+
+def library_versions() -> dict:
+    """{library: installed version} for the libraries a saved pipeline depends on, plus Python."""
+    versions = {"python": platform.python_version()}
+    for name in _PICKLE_LIBRARIES:
+        try:
+            versions[name] = version(name)
+        except PackageNotFoundError:
+            versions[name] = None
+    return versions
+
+
+def versions_path(model_path) -> Path:
+    """Where `save_pipeline` writes the library versions: next to the model, `<name>.versions.json`."""
+    model_path = Path(model_path)
+    return model_path.with_name(model_path.stem + ".versions.json")
+
+
 def save_pipeline(pipeline, path) -> Path:
-    """Saves a fitted pipeline with joblib (the folder is created if needed)."""
+    """Saves a fitted pipeline with joblib (the folder is created if needed), and the library
+    versions it was saved with next to it (`versions_path`)."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     joblib.dump(pipeline, path)
+    versions_path(path).write_text(json.dumps(library_versions(), indent=2), encoding="utf-8")
     return path
 
 
 def load_pipeline(path):
-    """Loads a pipeline saved by `save_pipeline`."""
+    """Loads a pipeline saved by `save_pipeline`. Warns when an installed library version differs
+    from the one the model was saved with (its predictions may change, or loading may fail).
+    Only load files you trust: a .joblib file can run code when loaded."""
+    path = Path(path)
+    saved = versions_path(path)
+    if saved.exists():
+        expected, installed = json.loads(saved.read_text(encoding="utf-8")), library_versions()
+        different = {name: (expected[name], installed.get(name)) for name in expected
+                     if name != "python" and expected[name] != installed.get(name)}
+        if different:
+            details = ", ".join(f"{name} saved {old} / installed {new}" for name, (old, new) in different.items())
+            warnings.warn(f"{path.name} was saved with other library versions ({details}). "
+                          "Install the saved versions or re-run main.py.", stacklevel=2)
     return joblib.load(path)
+
+
+def check_input_columns(raw_records: pd.DataFrame, config: dict) -> None:
+    """
+    Raises ValueError naming every column the model needs that `raw_records` lacks (after the
+    Portuguese -> English renames). Targets are never needed. Extra columns are allowed: the
+    schema validation reports them.
+    """
+    columns = set(standardize_columns(raw_records.head(0), config["diagnostics"]["column_renames"]).columns)
+    needed = [c for c in config["schema"]["required_columns"] if c not in config["data"]["target_columns"]]
+    missing = [c for c in needed if c not in columns]
+    if missing:
+        raise ValueError(f"The input lacks {len(missing)} column(s) the model needs: {missing}. "
+                         "It must have the columns of test.csv (original or English names).")
+
+
+def prepare_new_records(raw_records: pd.DataFrame, config: dict, task: str, clientes=None) -> tuple:
+    """Raw purchases (as in test.csv) -> (X, extras) with the same stateless steps as training.
+    Row-preserving: no row is dropped, not even a duplicate -- every row needs a prediction."""
+    check_input_columns(raw_records, config)
+    table, _ = prepare_table(raw_records, config, clientes)
+    X, _, extras = get_task(task).preprocessing.prepare_features(table, config)
+    if len(X) != len(raw_records):
+        raise AssertionError("Preparing the new records lost rows -- every row needs a prediction.")
+    return X, extras
 
 
 def predict_new_records(raw_records: pd.DataFrame, config: dict, task: str, pipeline, clientes=None,
@@ -121,8 +275,7 @@ def predict_new_records(raw_records: pd.DataFrame, config: dict, task: str, pipe
     Disable diagnostics.customer_history.use BEFORE fitting to compare against no history.
     Nothing is fitted on the new rows.
     """
-    table, _ = prepare_table(raw_records, config, clientes)
     # `history` is retained for call compatibility. The fitted pipeline owns its
     # authorised source; an external dataframe must not bypass its training cutoff.
-    X, _, _ = get_task(task).preprocessing.prepare_features(table, config)
+    X, _ = prepare_new_records(raw_records, config, task, clientes)
     return pipeline.predict(X)

@@ -33,12 +33,12 @@ def resolve_search_space(pipeline, search_space: dict) -> dict:
     resolved = {}
     for name, spec in search_space.items():
         wrapped = name.replace("model__", "model__regressor__", 1)
-        if name in valid:
-            resolved[name] = spec
-        elif wrapped in valid:
-            resolved[wrapped] = spec
-        else:
+        # multiple imputation (`imputation.n_imputations` > 1) holds the Pipeline as `pipeline`
+        candidates = [name, wrapped, f"pipeline__{name}", f"pipeline__{wrapped}"]
+        match = next((candidate for candidate in candidates if candidate in valid), None)
+        if match is None:
             raise ValueError(f"Search-space parameter '{name}' is not a parameter of the pipeline.")
+        resolved[match] = spec
     return resolved
 
 

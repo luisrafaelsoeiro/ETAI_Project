@@ -25,7 +25,9 @@ import yaml
 from src.evaluate import (
     cross_validate_pipeline, cross_validate_with_oof, cv_report, greater_is_better, select_scoring, temporal_folds,
 )
-from src.pipeline import build_pipeline, load_pipeline, predict_new_records, prepare_task_data, save_pipeline
+from src.pipeline import (
+    build_pipeline, imputer_label, load_pipeline, predict_new_records, prepare_task_data, save_pipeline,
+)
 from src.results import save_predictions, save_run, save_scores
 from src.tasks import TASKS, get_task
 from src.tuning import nested_cross_validate, nested_cv_report, tune_pipeline, tuning_report
@@ -70,7 +72,7 @@ def run_task(config: dict, task: str, run: str) -> None:
     folds = temporal_folds(dates, config["cv"]["n_splits"], config["cv"]["gap_days"])
     summary = validation_summary(data)
     print(f"\n{'=' * 72}\n{task.upper()}  (target: {task_cfg['target']}, model: {model_cfg['type']}, "
-          f"selection metric: {metric})\n{'=' * 72}\n{summary}")
+          f"imputer: {imputer_label(prep_cfg)}, selection metric: {metric})\n{'=' * 72}\n{summary}")
     report = summary + "\n\n"
 
     # 2. No-model floor and default cross-validation ---------------------------------------
@@ -85,7 +87,8 @@ def run_task(config: dict, task: str, run: str) -> None:
     print(f"\nTemporal CV ({len(folds)} folds), default hyperparameters:  {metric} = {untuned:.4f} "
           f"± {fold_scores[f'validation_{metric}'].std(ddof=1):.4f}   (no-model floor: {floor:.4f})")
     report += (f"Encoder: {prep_cfg['encoder']}   scaler: {prep_cfg['scaler']}   "
-               f"imputation: {prep_cfg['imputation']}\n"
+               f"numeric imputer: {imputer_label(prep_cfg)}\n"
+               f"Imputation settings: {prep_cfg['imputation']}\n"
                f"Hyperparameters from config.yaml: {model_cfg.get('params')}\n\n"
                + cv_report(fold_scores, metrics, metric, "Temporal cross-validation (default hyperparameters)", higher)
                + f"\n\nNo-model floor (dummy, same folds): {metric} = {floor:.4f}")
@@ -127,15 +130,16 @@ def run_task(config: dict, task: str, run: str) -> None:
     # 5. Scoreboard --------------------------------------------------------------------------
     validation = final_scores[f"validation_{metric}"]
     row = {"run": run, "task": task, "model": model_cfg["type"], "tuned": bool(study),
-           "encoder": prep_cfg["encoder"], "scaler": prep_cfg["scaler"],
+           "encoder": prep_cfg["encoder"], "scaler": prep_cfg["scaler"], "imputer": imputer_label(prep_cfg),
            "params": str(model_cfg.get("params")), "tuned_params": str(study.best_params) if study else "",
            "metric": metric, "mean": validation.mean(), "std": validation.std(ddof=1),
            "untuned": untuned, "floor": floor,
            **{f"fold_{i}": score for i, score in enumerate(validation, start=1)}}
     runs = save_scores(output.get("scoreboard", "results/runs.csv"), row)
+    runs["imputer"] = runs["imputer"].fillna("-")          # runs saved before the imputer was recorded
     board = (runs[runs["task"] == task]
              .sort_values("mean", ascending=not higher)
-             [["run", "model", "tuned", "encoder", "scaler", "mean", "std", "untuned", "floor"]]
+             [["run", "model", "tuned", "encoder", "scaler", "imputer", "mean", "std", "untuned", "floor"]]
              .rename(columns={"mean": metric}).head(10)
              .to_string(index=False, float_format=lambda v: f"{v:.4f}"))
     print(f"\nScoreboard ({task}, best first)\n{board}")
@@ -170,7 +174,7 @@ def run_task(config: dict, task: str, run: str) -> None:
     report += saved + "\n"
 
     # 8. Run report -------------------------------------------------------------------------
-    path = save_run(output.get("results_dir", "results"), run, task, config, report)
+    path = save_run(output.get("results_dir", "results"), run, task, config, report, imputer_label(prep_cfg))
     print(f"\n{refit}\n{saved}\nFull report: {path}")
 
 

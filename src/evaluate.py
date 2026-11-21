@@ -17,6 +17,7 @@ import warnings
 
 import numpy as np
 import pandas as pd
+from scipy import stats
 from sklearn.exceptions import ConvergenceWarning
 from sklearn.model_selection import cross_validate
 
@@ -154,6 +155,35 @@ def compare_preprocessing_variants(variants: dict, model_factory, X, y, folds, s
     ascending = not greater_is_better(scoring[metric])
     table = pd.DataFrame(rows).sort_values(f"mean_{metric}", ascending=ascending).reset_index(drop=True)
     return table, per_fold
+
+
+def fold_test_train_ratio(folds) -> float:
+    """Mean of validation rows / training rows over the folds: the `test_train_ratio` of
+    `corrected_paired_test` (1 / (k - 1) for plain k-fold; varies by fold for expanding windows)."""
+    return float(np.mean([len(validation) / len(train) for train, validation in folds]))
+
+
+def corrected_paired_test(scores_a, scores_b, test_train_ratio: float, higher_is_better: bool = True) -> dict:
+    """
+    Corrected paired t-test (Nadeau & Bengio, 2003) for two options scored on the same folds,
+    positive when A is better. Folds share most of their training rows, so their scores are
+    correlated and the plain t-test is overconfident: the variance of the differences is
+    inflated by `test_train_ratio` (`fold_test_train_ratio`).
+
+    For this project it is an APPROXIMATION reported next to `paired_comparison`, not a
+    verdict: the correction was derived for random resampling, while expanding temporal
+    windows overlap even more (fold k's training rows contain fold k-1's) and their ratio
+    changes from fold to fold (the mean is used). With 5 folds the test has little power, so a
+    large p-value means "no evidence of a difference", never "equivalent".
+    """
+    a, b = np.asarray(scores_a, dtype=float), np.asarray(scores_b, dtype=float)
+    diffs = a - b if higher_is_better else b - a
+    k = len(diffs)
+    se = np.sqrt((1 / k + test_train_ratio) * diffs.var(ddof=1)) if k > 1 else np.nan
+    t = float(diffs.mean() / se) if se and se > 0 else 0.0
+    p_value = float(2 * stats.t.sf(abs(t), df=k - 1)) if k > 1 else np.nan
+    return {"mean_advantage": float(diffs.mean()), "corrected_se": float(se), "t": t, "p_value": p_value,
+            "test_train_ratio": float(test_train_ratio)}
 
 
 def paired_comparison(scores_a, scores_b, higher_is_better: bool = True) -> dict:

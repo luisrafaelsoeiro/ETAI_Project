@@ -59,10 +59,15 @@ pip install -r requirements.txt
 ```bash
 python main.py                          # both tasks: classification, then regression
 python main.py --task classification    # or: --task regression
-python tests/test_pipeline.py           # 20 automated checks of the pipeline (or: python -m pytest tests)
+python tests/test_pipeline.py           # 40 automated checks of the pipeline (or: python -m pytest tests)
 ```
 
-The notebooks in `notebooks/` run with the same environment and find the project root themselves. They follow the workflow in order (01 → 06), and each one also runs on its own.
+```bash
+python predict.py data/examples/new_purchases.csv predictions.csv   # predict new purchases with the saved models
+python predict.py data/raw/test.csv predictions.csv --task classification
+```
+
+The notebooks in `notebooks/` run with the same environment and find the project root themselves. They follow the workflow in order (01 → 08), and each one also runs on its own.
 
 ### What `python main.py` does, per task
 
@@ -81,9 +86,27 @@ The notebooks in `notebooks/` run with the same environment and find the project
 | `results/<task>_<model>_<run>.txt` | full report: validation summary, per-fold scores, overfitting gap, tuning, out-of-fold report (confusion matrix / errors by spend band), locked-test report when enabled |
 | `results/predictions/classification.csv` | test.csv predictions in the Kaggle format (`ID`, `repeat_purchase_90d`), checked against `sample_submission.csv` |
 | `results/predictions/regression.csv` | test.csv predictions (`ID`, `spend_next_90d`) |
-| `models/<task>_pipeline.joblib` | fitted pipeline (preprocessing + model), ready for `src/pipeline.py` → `load_pipeline()` / `predict_new_records()` |
+| `models/<task>_pipeline.joblib` | fitted pipeline (preprocessing + model), ready for `predict.py`, or `src/pipeline.py` → `load_pipeline()` / `predict_new_records()` |
+| `models/<task>_pipeline.versions.json` | the library versions the pipeline was saved with; `load_pipeline()` warns when the installed ones differ |
 
-`results/` and `models/` are generated and git-ignored.
+`results/`, `models/` and `predictions.csv` are generated and git-ignored.
+
+### Predicting new data (`predict.py`)
+
+```bash
+python predict.py <input.csv> [output.csv] [--task classification|regression|both] [--config config.yaml]
+```
+
+It loads the pipelines saved by `python main.py` and predicts a CSV with the columns of test.csv (original Portuguese or English names; no target needed). There is no training. Every row goes through the same stateless cleaning as training: placeholder tokens → `NaN`, schema checks, consistency rules and the customer-table join. Then the saved pipeline fills the gaps with what it learned in training (frozen customer history, imputers) and encodes categories never seen in training. **No row is dropped, not even a duplicate.** The output has one row per input row, in the input's order:
+
+| Column | Content |
+|---|---|
+| `ID` | the purchase id, as in the input |
+| `repeat_probability` | probability that the customer buys again within 90 days |
+| `repeat_purchase_90d` | that prediction at threshold 0.5 (0/1, as in the Kaggle file) |
+| `spend_next_90d` | predicted spend in the next 90 days **if** the customer returns, in euros (the regression only learned from returning customers) |
+
+`data/examples/new_purchases.csv` holds 20 test.csv purchases made messy on purpose: placeholder tokens, a blank value, an unseen and an invalid category label, a customer with no history, the `1000000000` placeholder and the same purchase twice. It gives 20 predictions. `predict.py` stops with a clear message naming every missing column when the input lacks one the model needs. It also warns when the installed library versions differ from the saved ones. Only load `.joblib` files you trust: loading one can run code.
 
 ### Changing the experiment (`config.yaml`)
 
@@ -94,6 +117,7 @@ The notebooks in `notebooks/` run with the same environment and find the project
 | change the metrics | `<task>.metrics` and `<task>.selection_metric` (options in `<task>/evaluate.py` → `SCORING`) |
 | change the recipe | `<task>.preprocessing` (encoder, scaler, imputation, extra features) or the shared `preprocessing` section |
 | exclude columns | `exclude_features` in the shared `preprocessing` section (both tasks) or in `<task>.preprocessing` (that task only). A dropped column takes with it the imputation settings that read it, and a name that is not in the task's feature lists is an error |
+| change the numeric imputer | `imputation.numeric_strategy`: median \| mean \| constant \| knn \| iterative \| random_forest; `categorical_helpers: true` lets knn / iterative / random_forest also see the categories; `n_imputations: 5` (iterative only) trains 5 pipelines on drawn datasets and averages them. The imputer is shown on the scoreboard |
 | add a feature-selection step | `preprocessing.selection`: `method: none` (default) \| `variance` \| `l1` \| `forest` \| `kbest`. It sits between the recipe and the model and is fitted on the training rows of each fold only |
 | score the locked test set (final models only) | `test_set.evaluate: true`, plus `refit_on_all_rows: true` to refit on every labelled row afterwards |
 
@@ -105,13 +129,15 @@ The notebooks in `notebooks/` run with the same environment and find the project
 ETAI_Project/
 │
 ├── main.py                         # entry point: python main.py [--task classification|regression|both]
+├── predict.py                      # predicts a CSV of new purchases with the saved models (no training)
 ├── config.yaml                     # every rule and choice, in pipeline order (no fitted values)
 ├── requirements.txt
 ├── README.md
 │
 ├── data/
 │   ├── README.md                   # data dictionary
-│   └── raw/                        # train.csv, test.csv, clientes.csv, sample_submission.csv (never modified)
+│   ├── raw/                        # train.csv, test.csv, clientes.csv, sample_submission.csv (never modified)
+│   └── examples/new_purchases.csv  # 20 messy new purchases for predict.py
 │
 ├── notebooks/                      # evidence for every decision, in workflow order (they import the pipeline's own code)
 │   ├── 01_data_cleaning.ipynb      # diagnosis, validation, dates, duplicates, identity and consistency rules,
@@ -123,8 +149,10 @@ ETAI_Project/
 │   ├── 05_preprocessing_and_models.ipynb        # build_preprocessor, encoder x scaler, models, final model scores
 │   ├── 06_feature_engineering_selection.ipynb   # data additions, redundancy, relevance, permutation importance,
 │   │                               # engineered features, feature selection
-│   └── 07_classification_modelling.ipynb        # baselines, 7 tuned models (Optuna + nested CV), metric comparison,
-│                                   # final model, threshold & business value, SHAP / LIME, drivers of return
+│   ├── 07_classification_modelling.ipynb        # baselines, 7 tuned models (Optuna + nested CV), metric comparison,
+│   │                               # final model, threshold & business value, SHAP / LIME, drivers of return
+│   └── 08_missing_values_and_deployment.ipynb   # imputers as a setting, hidden-value test, MICE, RF proximities,
+│                                   # saving the model and predict.py
 │
 ├── src/                            # shared by both tasks
 │   ├── data.py                     # loading, placeholder report, column names, schema and customer_id validation, dtypes
@@ -149,9 +177,10 @@ ETAI_Project/
 │   └── evaluate.py                 # metrics (SCORING), error reports by spend band
 │
 ├── tests/
-│   └── test_pipeline.py            # 20 checks: feature lists, indicators, leakage, cleaning, schema, selection step, exclusions,
+│   └── test_pipeline.py            # 40 checks: feature lists, indicators, leakage, cleaning, schema, selection step, exclusions,
 │                                   # placeholders, save/load/predict, tuning, Kaggle format, customer table,
-│                                   # exact recoveries, customer-history fill, row limits, column estimates
+│                                   # exact recoveries, customer-history fill, row limits, column estimates,
+│                                   # imputers, multiple imputation, corrected test, predict.py
 │
 ├── results/                        # generated by main.py (git-ignored)
 └── models/                         # generated by main.py (git-ignored)
@@ -194,6 +223,7 @@ See `data/README.md` for the files and the column dictionary. Each row is a **cu
 | Imputation | Exact recovery of the largest / smallest previous purchase; gaps filled from the customer's earlier purchases (categories, days since the previous purchase); imputed values kept within their row's limits; `spend_365d` estimated from related columns (regression); medians learned without structural zeros; expanded KNN comparison with a median-tuned forest (sensitivity only) | `src/cleaning.py`, `src/preprocessing.py` → `RowBoundedImputer`, `notebooks/03_missing_values.ipynb` |
 | Repository reorganisation | Baseline-pipeline structure. Shared code split into `src/data`, `cleaning`, `preprocessing`, `pipeline`, `evaluate`, `tuning`, `results`; task packages reduced to what differs (`preprocessing`, `model`, `evaluate`). `main.py` runs the full workflow (dummy floor, temporal CV, optional Optuna + nested CV, scoreboard, run reports, optional locked-test evaluation, saved models, Kaggle predictions). Notebooks moved to `notebooks/`; redundant files removed | whole repository |
 | Notebook reorganisation | The five notebooks regrouped into six, one per stage of the workflow: data cleaning → customer table → missing values → outliers → preprocessing recipe and models → feature engineering and selection. Sections moved, nothing removed. The locked test set, the temporal folds and the decision rule come first (notebook 01, sections 6–7), and every notebook runs on its own | `notebooks/` |
+| W10 · Missing values + deployment | The numeric fallback imputer is a setting (`imputation.numeric_strategy`: median, mean, constant, knn, iterative = MICE, **random_forest** = missForest), compared with the corrected paired t-test; options for the imputer to also see the categories (`categorical_helpers`) and for multiple imputation (`n_imputations`); hidden-value test and random-forest proximities from scratch; imputer on the scoreboard and in the reports. `main.py` saves each pipeline **with its library versions**; new `predict.py` predicts any test.csv-like CSV from the terminal (one row per input row, clear error on missing columns) | `src/preprocessing.py` → `_NUMERIC_IMPUTERS`, `RowBoundedImputer`; `src/pipeline.py` → `MultipleImputation*`, `save_pipeline` / `load_pipeline`; `src/evaluate.py` → `corrected_paired_test`; `src/experiments.py --experiment imputers`; `predict.py`; `data/examples/`; `notebooks/08_missing_values_and_deployment.ipynb`; `docs/experiments/imputers/` |
 | Feature engineering + selection | Redundancy (correlation clusters, VIF), relevance (mutual information against a shuffled-target floor) and out-of-fold permutation importance; seven customer-behaviour features tested by paired ablation (none kept); an optional selection step in the Pipeline (variance, L1, forest, k-best; none beats the fixed lists, so it is off); 6 columns without signal per task removed through `exclude_features`, confirmed on the temporal folds | `config.yaml` → `exclude_features`, `diagnostics.derived_features`, `preprocessing.selection`; `src/preprocessing.py` → `drop_features`, `build_selector`; `notebooks/06_feature_engineering_selection.ipynb` |
 
 ---
@@ -437,7 +467,7 @@ A random split would let the model learn from a customer's later purchases and t
 
 Every comparison uses these folds, and two options are compared **fold by fold**. `paired_comparison` reports mean advantage (positive = A better, also for errors), standard deviation, minimum/maximum advantage, wins and ties. Overlapping temporal training windows make fold results dependent: these summaries are not confidence intervals or significance tests. The former `abs(mean) > 2*SE` rule has been removed. `consistent_gain` means strictly better on every fold, with at least two folds: a conservative screening heuristic, not a significance claim. Magnitude, domain reasoning and complexity still need review. Notebook 07's provisional automatic recommendation retains the current model unless its challenger passes this screen.
 
-See [scikit-learn's discussion of dependent CV scores](https://scikit-learn.org/1.7/auto_examples/model_selection/plot_grid_search_stats.html). We do not transplant its repeated-CV corrected test into this expanding-window temporal setup.
+See [scikit-learn's discussion of dependent CV scores](https://scikit-learn.org/1.7/auto_examples/model_selection/plot_grid_search_stats.html). The course's corrected paired t-test (Nadeau & Bengio; `src/evaluate.py` → `corrected_paired_test`) is reported for the week-10 imputer comparison (§10), using the mean validation/training ratio of our folds. That is an **approximation**: the correction was derived for random resampling, and expanding windows overlap even more. It sits next to `paired_comparison` and is not used as a decision rule.
 
 ### 8. Preprocessing pipeline [05 §1]
 
@@ -493,7 +523,13 @@ See [scikit-learn's discussion of dependent CV scores](https://scikit-learn.org/
   31. paired comparisons report descriptive directional differences, handle ties, and reject non-finite/mismatched scores;
   32. purchase-category imputation overrides preserve customer-profile policy, output order and unseen categories;
   33. experimental history variants are independent copies and keep date-gap recovery/profile imputation unchanged;
-  34. the candidate ticket ratio uses tax-inclusive amounts, handles zero history, and stays outside the current feature lists.
+  34. the candidate ticket ratio uses tax-inclusive amounts, handles zero history, and stays outside the current feature lists;
+  35. every `numeric_strategy` (median, mean, constant, knn, iterative, random_forest) fills every gap and keeps observed values; model-based imputers work in scaled space; an unknown strategy is an error;
+  36. with `categorical_helpers`, model-based imputers see the categories (unseen labels and gaps included) but output the numeric columns only; a median ignores them;
+  37. multiple imputation trains one pipeline per drawn dataset (own seed, `sample_posterior`), averages them, and predicts reproducibly and independently of the batch; it requires the iterative imputer;
+  38. the corrected paired t-test inflates the variance of fold differences and is directional for errors;
+  39. `predict.py` gives one prediction per input row (duplicates kept, input order), and on test.csv matches the pipeline;
+  40. `predict.py` names every missing column and stops; the saved library versions are checked at load.
 
 ### 9. Encoder × scaler [05 §2]
 
@@ -516,6 +552,20 @@ The refreshed section 4 comparison fits each imputer within each fold, with curr
 | KNN, 5 neighbours | 0.7109 | 1937.2830 |
 
 In this five-neighbour comparison, KNN improves three of five folds in each task. The expanded section 12 is now executed: classification KNN k=3 uniform reaches 0.711655 versus 0.709505 for median, improving four folds and tying one with none worse. With the median-tuned forest, best regression KNN mean gain is only 0.2288 euros on three of five seed-averaged folds. Removing the spend formula improves 9.0426 euros on four folds but loses one, and remains a candidate for the upcoming model-specific comparisons. Keep median as the reference while carrying the promising alternatives forward; do not call it a demonstrated winner. See [full scope, timing and results](docs/recipe_comparisons.md).
+
+#### Week 10: the imputer as a setting [08 §1–6]
+
+**Missing values.** After the exact recoveries and the history fill, only `spend_365d` (2.7%) and `prior_max_purchase_value` (0.7%) still have numeric gaps. We ran median, KNN, MICE (`iterative`) and missForest (`random_forest`), each also seeing the categories, plus MICE with 5 completed datasets, with each task's configured model on the 5 temporal folds (regression: 3 forest seeds per fold). Each was compared with the median by `paired_comparison` and the corrected paired t-test (§7: an approximation on expanding windows):
+
+| Imputer | Classification accuracy | vs median: folds better / tied, corrected p | Regression RMSE | vs median: folds better, corrected p | Seconds per CV (cl. / reg.) |
+|---|---:|---|---:|---|---:|
+| median (kept) | 0.7095 | — | 1938.54 | — | 5 / 7 |
+| knn | 0.7109 | 3 / 2, p 0.43 | 1938.38 | 4, p 0.78 | 6 / 7 |
+| iterative | 0.7097 | 3 / 0, p 0.84 | 1938.20 | 3, p 0.64 | 8 / 10 |
+| random_forest | 0.7100 | 3 / 0, p 0.74 | 1938.33 | 3, p 0.75 | 47 / 42 |
+| iterative x5 (MICE) | 0.7105 | 3 / 0, p 0.67 | 1937.90 | 5, p 0.26 | 23 / 75 |
+
+The `+categories` variants are within ±0.0005 accuracy and ±0.4 euros of the same imputer without them. On 200 hidden values per fold, missForest guesses best (`spend_365d`: 1,217 vs 2,356 euros of error for the median), but **no imputer changes either model**. The largest gains are 0.0014 accuracy, about one purchase per validation fold, and 0.64 euros of RMSE at 11 times the cost. Every corrected p-value is above 0.09. Few values are imputed, the row limits already keep a median guess plausible, and the `spend_365d` flag tells the model the value was guessed. **We keep the median:** as good, 10 times faster than missForest, and the simplest. Random-forest proximities (a forest grown on repurchase) guess worse than missForest and need the target and the whole training matrix, so they are not used. Tables: `docs/experiments/imputers/`; replay: `python -m src.experiments --experiment imputers --output-dir docs/experiments/imputers` (~20 min).
 
 For categorical fallbacks, the controlled history × mode/Missing experiment is in [the experiment record](docs/preprocessing_experiments.md). Current per-task policies remain provisional. The broad imputer/feature searches not refreshed in this run retain their pending status.
 

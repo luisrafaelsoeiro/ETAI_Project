@@ -1,0 +1,48 @@
+{
+  "config_sha256": "98be185fa3153e046ace7eadaf2ac01b97adef49bba982b3352f83e76d6343d9",
+  "config_semantic_sha256": "fdd276b3f2880e41d4f6b803c3f254239f615f1dcfe036a68c0c45793121dc6a",
+  "train_sha256": "93963c048b6be0da2b932714e938961c087db6aa6144903fbb3042bbdb37e5b5",
+  "data_normalized_sha256": {
+    "train_path": "e8598a3402d81ce72966a4585dde79483be779be25542daf47d7a28fa7adc5a5",
+    "test_path": "2ac176cd1e268a41345055ca3b6250b9b4e35c3095437383955441c38a5c761e",
+    "clientes_path": "a2728544cd85f83859ab164199c65bc16601384f8f687e84a76d37409f255740"
+  },
+  "runtime": {
+    "python": "3.12.10",
+    "pandas": "3.0.6",
+    "numpy": "2.5.4",
+    "scikit-learn": "1.7.2",
+    "category-encoders": "2.11.1"
+  },
+  "cv": {
+    "n_splits": 5,
+    "gap_days": 90
+  },
+  "regression_model_seeds": [
+    42,
+    1,
+    2
+  ],
+  "classification_model_seed": 42,
+  "mask_fraction": 0.1,
+  "mask_seed": 42,
+  "holdout_scored": false,
+  "models": {
+    "classification": {
+      "type": "logistic_regression",
+      "params": {
+        "max_iter": 2000
+      }
+    },
+    "regression": {
+      "type": "random_forest",
+      "params": {
+        "n_estimators": 300,
+        "min_samples_leaf": 5,
+        "n_jobs": -1,
+        "random_state": 42
+      },
+      "target_transform": "none"
+    }
+  }
+}

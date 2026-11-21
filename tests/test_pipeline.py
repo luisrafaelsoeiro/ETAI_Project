@@ -10,6 +10,7 @@ predicting new records with the complete pipeline, Optuna tuning with nested tem
 and the Kaggle submission format.
 """
 import copy
+import json
 import os
 import sys
 import tempfile
@@ -649,6 +650,146 @@ def test_column_estimates_and_structural_rows_in_the_imputer():
     out = pd.DataFrame(RowBoundedImputer(SimpleImputer(strategy="median"), features, column_imputers=bands)
                        .fit(train).transform(new), columns=features)
     assert out["prior_max_purchase_value"].tolist() == [260, 77, 900], "median of the row's purchase-count band"
+
+
+# ---------------------------------------------------------------- week 10: imputers as a setting
+def _recipe_with(imputation_overrides, task="classification"):
+    recipe = copy.deepcopy(task_data(task)["preprocessing_config"])
+    recipe["imputation"] = {**recipe["imputation"], **imputation_overrides}
+    return recipe
+
+
+def test_every_numeric_imputer_is_a_setting_and_only_fills_gaps():
+    from src.preprocessing import _NUMERIC_IMPUTERS
+    data = task_data("classification")
+    numeric = data["preprocessing_config"]["numeric_features"]
+    history = data["X_dev"].iloc[:1500]
+    for strategy in _NUMERIC_IMPUTERS:
+        recipe = _recipe_with({"numeric_strategy": strategy, "n_estimators": 5, "max_iter": 2})
+        prep = build_preprocessor(recipe).fit(history, data["y_dev"].iloc[:1500])
+        step = prep.named_transformers_["numeric"].named_steps["impute"]
+        X = history[numeric].astype("float64")
+        out = step.transform(X)
+        assert out.shape == X.shape and not np.isnan(out).any(), f"{strategy} must fill every gap"
+        observed = X.notna().to_numpy()
+        assert np.allclose(out[observed], X.to_numpy()[observed]), f"{strategy} must keep observed values"
+        assert (step.scaler_ is not None) == (strategy in ("knn", "iterative", "random_forest")), \
+            "model-based imputers work in scaled space"
+    assert "numeric_strategy" in expect_error(build_preprocessor, _recipe_with({"numeric_strategy": "magic"}))
+
+
+def test_categorical_helpers_are_seen_by_model_based_imputers_but_never_output():
+    data = task_data("classification")
+    numeric, categories = (data["preprocessing_config"][k] for k in ("numeric_features", "categorical_features"))
+    train = data["X_dev"].iloc[:1500]
+    for strategy, expected in [("knn", categories), ("median", [])]:
+        recipe = _recipe_with({"numeric_strategy": strategy, "categorical_helpers": True})
+        prep = build_preprocessor(recipe).fit(train, data["y_dev"].iloc[:1500])
+        step = prep.named_transformers_["numeric"].named_steps["impute"]
+        assert list(step.helper_features) == list(expected), "a median has no use for the categories"
+        out = step.transform(train[numeric + list(expected)])
+        assert out.shape == (len(train), len(numeric)), "the step outputs the numeric columns only"
+    # categories it never saw, and gaps in them, are accepted at prediction time
+    knn = build_preprocessor(_recipe_with({"numeric_strategy": "knn", "categorical_helpers": True}))
+    knn.fit(train, data["y_dev"].iloc[:1500])
+    new = train.head(3).copy()
+    new[categories[0]] = new[categories[0]].astype(object)
+    new.loc[new.index[0], categories[0]], new.loc[new.index[1], categories[0]] = "never seen", np.nan
+    assert np.isfinite(knn.transform(new)).all()
+
+
+def test_multiple_imputation_trains_one_pipeline_per_drawn_dataset_and_averages():
+    from src.pipeline import MultipleImputationClassifier, MultipleImputationRegressor, fitted_imputer, imputer_label
+    data = task_data("classification")
+    recipe = _recipe_with({"numeric_strategy": "iterative", "n_imputations": 3, "random_state": 7})
+    ensemble = build_pipeline(recipe, TASKS["classification"].model.build_model(config()["classification"]["model"]))
+    assert isinstance(ensemble, MultipleImputationClassifier) and imputer_label(recipe) == "iterative x3"
+    ensemble.fit(data["X_dev"], data["y_dev"])
+    imputers = [fitted_imputer(p) for p in ensemble.pipelines_]
+    assert [i.random_state for i in imputers] == [7, 8, 9], "one seed per completed dataset"
+    assert all(p.get_params()["prep__numeric__impute__imputer__sample_posterior"] for p in ensemble.pipelines_), \
+        "every copy is trained on a drawn dataset"
+    first = ensemble.predict_proba(data["X_kaggle"])
+    members = np.mean([p.predict_proba(data["X_kaggle"]) for p in ensemble.pipelines_], axis=0)
+    assert np.allclose(first, members) and np.allclose(ensemble.predict_proba(data["X_kaggle"]), first), \
+        "the average of the copies, reproducible: no new draw at prediction time"
+    assert np.allclose(ensemble.predict_proba(data["X_kaggle"].iloc[::-1])[::-1], first), "independent of the batch"
+    assert not np.allclose(*[p.predict_proba(data["X_dev"])[:, 1] for p in ensemble.pipelines_[:2]]), \
+        "the copies differ: each learned from another completed dataset"
+    assert set(np.unique(ensemble.predict(data["X_kaggle"]))) <= {0, 1}
+    regression = build_pipeline(_recipe_with({"numeric_strategy": "iterative", "n_imputations": 2}, "regression"),
+                                TASKS["regression"].model.build_model({"type": "ridge"}))
+    assert isinstance(regression, MultipleImputationRegressor)
+    assert "iterative" in expect_error(build_pipeline, _recipe_with({"numeric_strategy": "knn", "n_imputations": 2}),
+                                       TASKS["classification"].model.build_model({"type": "dummy"}))
+
+
+def test_corrected_paired_test_inflates_the_variance_of_fold_differences():
+    from src.evaluate import corrected_paired_test, fold_test_train_ratio
+    a, b = [0.72, 0.70, 0.74, 0.71, 0.73], [0.70, 0.69, 0.71, 0.70, 0.70]
+    plain = corrected_paired_test(a, b, 0.0)
+    corrected = corrected_paired_test(a, b, 0.25)
+    assert corrected["mean_advantage"] > 0 and corrected["p_value"] > plain["p_value"], "correction -> larger p"
+    assert np.isclose(corrected_paired_test(b, a, 0.25, higher_is_better=False)["t"], corrected["t"]), \
+        "positive = A better, for errors too"
+    folds = [(np.arange(100), np.arange(100, 150)), (np.arange(150), np.arange(150, 200))]
+    assert np.isclose(fold_test_train_ratio(folds), (0.5 + 1 / 3) / 2)
+
+
+# ---------------------------------------------------------------- week 10: predict.py
+def _saved_models(folder):
+    from src.pipeline import save_pipeline
+    for task in TASKS:
+        data = task_data(task)
+        save_pipeline(task_pipeline(task).fit(data["X_dev"], data["y_dev"]), Path(folder) / f"{task}_pipeline.joblib")
+    cfg = copy.deepcopy(config())
+    cfg["output"]["models_dir"] = str(folder)
+    path = Path(folder) / "config.yaml"
+    path.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    return path
+
+
+def test_predict_cli_gives_one_prediction_per_input_row():
+    import predict
+    with tempfile.TemporaryDirectory() as folder:
+        cfg_path = _saved_models(folder)
+        out = Path(folder) / "predictions.csv"
+        assert predict.main(["data/examples/new_purchases.csv", str(out), "--config", str(cfg_path)]) == 0
+        new = pd.read_csv("data/examples/new_purchases.csv")
+        written = pd.read_csv(out)
+        assert len(written) == len(new) == 20, "rows out = rows in"
+        assert written["ID"].tolist() == new["ID"].tolist(), "same ids, same order, duplicates kept"
+        assert written.notna().all().all() and set(written["repeat_purchase_90d"]) <= {0, 1}
+        assert written.iloc[14].equals(written.iloc[15]), "the same purchase twice gets the same prediction"
+        # test.csv through predict.py = the pipeline on the prepared test.csv matrix
+        test_out = Path(folder) / "test_predictions.csv"
+        assert predict.main(["data/raw/test.csv", str(test_out), "--config", str(cfg_path)]) == 0
+        loaded = joblib.load(Path(folder) / "classification_pipeline.joblib")
+        expected = loaded.predict_proba(task_data("classification")["X_kaggle"])[:, 1]
+        assert np.allclose(pd.read_csv(test_out)["repeat_probability"], expected, atol=1e-6)
+
+
+def test_predict_stops_clearly_on_missing_columns_and_warns_on_other_library_versions():
+    import predict
+    from src.pipeline import load_pipeline, versions_path
+    new = pd.read_csv("data/examples/new_purchases.csv").drop(columns=["Custo", "payment_type"])
+    message = expect_error(predict.predict, new, {}, config())
+    assert "cost" in message and "payment_type" in message, "names every missing column"
+    with tempfile.TemporaryDirectory() as folder:
+        cfg_path = _saved_models(folder)
+        broken = Path(folder) / "broken.csv"
+        new.to_csv(broken, index=False)
+        assert predict.main([str(broken), str(Path(folder) / "out.csv"), "--config", str(cfg_path)]) == 1
+        model = Path(folder) / "classification_pipeline.joblib"
+        versions = json.loads(versions_path(model).read_text(encoding="utf-8"))
+        assert versions["scikit-learn"] and versions["xgboost"], "the versions are saved next to the model"
+        versions["scikit-learn"] = "0.0.1"
+        versions_path(model).write_text(json.dumps(versions), encoding="utf-8")
+        import warnings
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            load_pipeline(model)
+        assert any("library versions" in str(w.message) for w in caught)
 
 
 def test_schema_validation_flags_and_repairs():

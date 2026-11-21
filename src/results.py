@@ -23,7 +23,7 @@ def save_scores(path: str, row: dict) -> pd.DataFrame:
     return runs
 
 
-def save_run(results_dir: str, run: str, task: str, config: dict, report_text: str) -> str:
+def save_run(results_dir: str, run: str, task: str, config: dict, report_text: str, imputer: str = None) -> str:
     """
     Writes the run's settings and full report to `results_dir/<task>_<model>_<run>.txt`.
     `run` is the run id (a timestamp), the same as the run's row in the scoreboard, so the
@@ -41,7 +41,8 @@ def save_run(results_dir: str, run: str, task: str, config: dict, report_text: s
         f"Run: {run}\nTask: {task}  (target: {task_cfg['target']})\n"
         f"Model: {model_type}  params={task_cfg['model'].get('params')}"
         f"{'  target_transform=' + task_cfg['model']['target_transform'] if 'target_transform' in task_cfg['model'] else ''}\n"
-        f"CV: {cv['n_splits']} expanding-window temporal folds, gap {cv['gap_days']} days\n"
+        + (f"Numeric imputer: {imputer}\n" if imputer else "")
+        + f"CV: {cv['n_splits']} expanding-window temporal folds, gap {cv['gap_days']} days\n"
         f"Metrics: {', '.join(task_cfg['metrics'])}   selection metric: {task_cfg['selection_metric']}\n"
         f"Tuning: {tuning_line}\n"
         f"Locked test set: latest {test_set['size']:.0%} of purchases, gap {test_set.get('gap_days', 0)} days  "
